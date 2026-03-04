@@ -172,12 +172,15 @@ class QuizApp(tk.Tk):
         else:
             bg, fg, hover_bg = BTN_BG, FG_PRIMARY, BTN_HOVER
 
-        btn = tk.Button(
-            parent, text=text, command=command,
+        # Use tk.Label instead of tk.Button — macOS ignores bg/fg on
+        # native Aqua buttons, but Labels always respect colors.
+        btn = tk.Label(
+            parent, text=text,
             font=FONT_BODY_BOLD, bg=bg, fg=fg,
-            activebackground=hover_bg, activeforeground=fg,
-            relief="flat", cursor="hand2", width=width, pady=8,
+            cursor="hand2", width=width, pady=8,
+            relief="flat", anchor="center",
         )
+        btn.bind("<Button-1>", lambda e: command())
         btn.bind("<Enter>", lambda e: btn.configure(bg=hover_bg))
         btn.bind("<Leave>", lambda e: btn.configure(bg=bg))
         return btn
@@ -1382,14 +1385,19 @@ class QuizApp(tk.Tk):
             )
             entry.pack(side="left", padx=5, ipady=3)
 
-            # Bouton sauvegarder cette ligne
-            save_btn = tk.Button(
+            # Bouton sauvegarder cette ligne (Label pour macOS)
+            save_btn = tk.Label(
                 row, text="💾", font=FONT_BODY,
                 bg=BTN_BG, fg=FG_GREEN, relief="flat",
-                cursor="hand2", width=3,
-                command=lambda n=nombre, v=var, r=row: self._save_one_entry(
+                cursor="hand2", width=3, anchor="center", pady=3,
+            )
+            save_btn.bind(
+                "<Button-1>",
+                lambda e, n=nombre, v=var, r=row: self._save_one_entry(
                     n, v, r),
             )
+            save_btn.bind("<Enter>", lambda e, b=save_btn: b.configure(bg=BTN_HOVER))
+            save_btn.bind("<Leave>", lambda e, b=save_btn: b.configure(bg=BTN_BG))
             save_btn.pack(side="left", padx=5)
 
         # Bottom buttons
