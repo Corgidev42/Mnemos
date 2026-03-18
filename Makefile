@@ -7,7 +7,7 @@ GUI     := quiz_rappel_gui.py
 CLI     := quiz_rappel.py
 STATS   := stats_rappel.csv
 
-.PHONY: run cli check clean reset help
+.PHONY: run cli check clean reset dmg help
 
 ## run : Lance le quiz (interface graphique)
 run:
@@ -30,6 +30,11 @@ clean:
 	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	@echo "✅ Nettoyé"
+
+## dmg : Crée l'app .app et le .dmg (macOS)
+dmg:
+	@pip install -q pyinstaller 2>/dev/null || true
+	@chmod +x build_dmg.sh && ./build_dmg.sh
 
 ## reset : Remet les statistiques à zéro
 reset:

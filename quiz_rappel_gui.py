@@ -14,11 +14,21 @@ Améliorations v2 :
 """
 
 import csv
-import random
+import json
 import os
+import random
+import shutil
+import sys
+import tempfile
+import threading
 import time
+import urllib.request
 import tkinter as tk
 from tkinter import ttk, messagebox
+
+# Version — incrémenter à chaque release (ex: v1.0.1)
+VERSION = "1.0.0"
+GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
 
 # ============================================================
 # Constantes de style — thème Catppuccin Mocha
@@ -58,11 +68,93 @@ FONT_STREAK = ("Helvetica", 15, "bold")
 AUTO_ADVANCE_MS = 1200
 
 # ============================================================
-# Données
+# Données — chemins adaptés pour .app (bundle read-only)
 # ============================================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TABLE_FILE = os.path.join(BASE_DIR, "table_rappel.csv")
-STATS_FILE = os.path.join(BASE_DIR, "stats_rappel.csv")
+def _get_data_paths():
+    """Retourne (table_path, stats_path) pour dev ou .app."""
+    if getattr(sys, "frozen", False):
+        # Mode .app : données dans ~/Library/Application Support
+        app_support = os.path.join(
+            os.path.expanduser("~"),
+            "Library", "Application Support", "TableDeRappel"
+        )
+        os.makedirs(app_support, exist_ok=True)
+        bundle_dir = sys._MEIPASS  # ressources du bundle
+        table_bundle = os.path.join(bundle_dir, "table_rappel.csv")
+        stats_bundle = os.path.join(bundle_dir, "stats_rappel.csv")
+        table_path = os.path.join(app_support, "table_rappel.csv")
+        stats_path = os.path.join(app_support, "stats_rappel.csv")
+        # Copier la table par défaut si pas encore initialisée
+        if not os.path.exists(table_path) and os.path.exists(table_bundle):
+            shutil.copy(table_bundle, table_path)
+        if not os.path.exists(stats_path) and os.path.exists(stats_bundle):
+            shutil.copy(stats_bundle, stats_path)
+        return table_path, stats_path
+    # Mode développement
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return (
+        os.path.join(base_dir, "table_rappel.csv"),
+        os.path.join(base_dir, "stats_rappel.csv"),
+    )
+
+TABLE_FILE, STATS_FILE = _get_data_paths()
+
+
+# ============================================================
+# Mise à jour via GitHub Releases
+# ============================================================
+def _parse_version(s):
+    """Parse 'v1.0.2' ou '1.0.2' -> (1, 0, 2)."""
+    s = str(s).strip().lstrip("v")
+    try:
+        return tuple(int(x) for x in s.split(".")[:3])
+    except (ValueError, AttributeError):
+        return (0, 0, 0)
+
+
+def check_for_update(callback):
+    """
+    Vérifie si une mise à jour est disponible.
+    callback(ok, result) avec result = dict ou message d'erreur.
+    """
+    def _do_check():
+        try:
+            url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            tag = data.get("tag_name", "v0.0.0")
+            current = _parse_version(VERSION)
+            latest = _parse_version(tag)
+            if latest > current:
+                # Chercher un .dmg dans les assets
+                dmg_url = None
+                for asset in data.get("assets", []):
+                    if asset.get("name", "").endswith(".dmg"):
+                        dmg_url = asset.get("browser_download_url")
+                        break
+                callback(True, {"tag": tag, "url": dmg_url, "body": data.get("body", "")})
+            else:
+                callback(True, {"up_to_date": True})
+        except Exception as e:
+            callback(False, str(e))
+
+    threading.Thread(target=_do_check, daemon=True).start()
+
+
+def download_and_open_dmg(url, callback):
+    """Télécharge le .dmg et l'ouvre. callback(success, message)."""
+
+    def _do_download():
+        try:
+            dest = os.path.join(tempfile.gettempdir(), "TableDeRappel_update.dmg")
+            urllib.request.urlretrieve(url, dest)
+            os.system(f'open "{dest}"')  # macOS : monte le .dmg
+            callback(True, "Le fichier .dmg a été téléchargé et ouvert. Glisse « Table de Rappel » dans le dossier Applications pour terminer la mise à jour.")
+        except Exception as e:
+            callback(False, str(e))
+
+    threading.Thread(target=_do_download, daemon=True).start()
 
 
 def load_table():
@@ -113,7 +205,7 @@ def save_stats(stats):
 class QuizApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Table de Rappel — Quiz v2")
+        self.title(f"Table de Rappel — Quiz v{VERSION}")
         self.configure(bg=BG_DARK)
         self.minsize(960, 700)
         self.geometry("1000x740")
@@ -294,11 +386,20 @@ class QuizApp(tk.Tk):
         ).pack(side="left", padx=5)
 
         # Footer
+        footer_row = tk.Frame(self.container, bg=BG_DARK)
+        footer_row.pack(side="bottom", pady=(0, 10))
         tk.Label(
-            self.container,
+            footer_row,
             text="Raccourcis : 1-5 = modes · Échap = menu · Entrée = valider",
             font=FONT_SMALL, bg=BG_DARK, fg="#585b70",
-        ).pack(side="bottom", pady=(0, 10))
+        ).pack(side="left")
+        # Lien mise à jour
+        upd_lbl = tk.Label(
+            footer_row, text="  ·  🔄 Vérifier les mises à jour",
+            font=FONT_SMALL, bg=BG_DARK, fg=FG_ACCENT, cursor="hand2",
+        )
+        upd_lbl.pack(side="left")
+        upd_lbl.bind("<Button-1>", lambda e: self._check_update())
 
     def _draw_mastery_bar(self, canvas, total, ok, en_cours, revoir, non_vus):
         """Dessine une barre de progression colorée de la maîtrise globale."""
@@ -317,6 +418,45 @@ class QuizApp(tk.Tk):
                 canvas.create_rectangle(x, 0, x + seg_w, 12,
                                         fill=color, outline="")
             x += seg_w
+
+    def _check_update(self):
+        """Vérifie les mises à jour et affiche une boîte de dialogue."""
+        check_for_update(self._on_update_result)
+
+    def _on_update_result(self, ok, result):
+        """Callback après vérification des mises à jour (thread)."""
+        def _show():
+            if not ok:
+                messagebox.showerror("Erreur", f"Impossible de vérifier : {result}")
+                return
+            if result.get("up_to_date"):
+                messagebox.showinfo("À jour", f"Tu as déjà la dernière version (v{VERSION}).")
+                return
+            tag = result.get("tag", "")
+            url = result.get("url")
+            if url:
+                if messagebox.askyesno(
+                    "Mise à jour disponible",
+                    f"Une nouvelle version ({tag}) est disponible. Télécharger ?",
+                ):
+                    download_and_open_dmg(url, self._on_download_result)
+            else:
+                messagebox.showinfo(
+                    "Mise à jour disponible",
+                    f"Version {tag} disponible. Rends-toi sur GitHub pour la télécharger.",
+                )
+
+        self.after(0, _show)
+
+    def _on_download_result(self, success, message):
+        """Callback après téléchargement du .dmg (thread)."""
+        def _show():
+            if success:
+                messagebox.showinfo("Téléchargement terminé", message)
+            else:
+                messagebox.showerror("Erreur", f"Échec du téléchargement : {message}")
+
+        self.after(0, _show)
 
     # --------------------------------------------------------
     # Écran : Configuration bloc

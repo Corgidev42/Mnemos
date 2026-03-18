@@ -31,6 +31,7 @@ Ce programme est un quiz interactif qui t'aide à mémoriser les 100 corresponda
 - 🎯 **Re-quiz erreurs** — relance un quiz uniquement sur tes erreurs
 - 📖 **Vue table** avec recherche et code couleur (maîtrisé / en cours / à revoir)
 - 🗑 **Reset stats** en un clic
+- 🔄 **Mise à jour** — vérifie les nouvelles versions via GitHub (clic sur « Vérifier les mises à jour »)
 
 ---
 
@@ -80,7 +81,30 @@ python3 quiz_rappel_gui.py
 | `make check` | Vérifie la syntaxe Python |
 | `make clean` | Supprime les fichiers cache |
 | `make reset` | Remet les stats à zéro |
+| `make dmg` | Crée l'app .app et le .dmg (macOS) |
 | `make help` | Affiche l'aide |
+
+---
+
+## Build .dmg (macOS)
+
+Pour créer un installateur `.dmg` et une app autonome :
+
+```bash
+pip install pyinstaller
+make dmg
+# ou : ./build_dmg.sh
+```
+
+Le fichier `dist/TableDeRappel-1.0.0.dmg` est généré. Glisse l'app dans Applications pour installer.
+
+### Workflow de mise à jour
+
+1. Incrémenter `VERSION` dans `quiz_rappel_gui.py` (ex: `"1.0.1"`)
+2. Lancer `make dmg`
+3. Créer un tag : `git tag v1.0.1`
+4. Publier une release sur GitHub avec le `.dmg` en pièce jointe
+5. Les utilisateurs cliquent sur « Vérifier les mises à jour » dans l'app pour télécharger
 
 ---
 
@@ -92,6 +116,8 @@ python3 quiz_rappel_gui.py
 ├── quiz_rappel.py        # Version CLI originale
 ├── table_rappel.csv      # Table de rappel (nombre, mot)
 ├── stats_rappel.csv      # Statistiques de progression
+├── TableDeRappel.spec    # Config PyInstaller
+├── build_dmg.sh          # Script de build .dmg
 ├── Makefile              # Commandes utilitaires
 ├── .gitignore
 └── README.md
