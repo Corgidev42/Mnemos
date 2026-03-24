@@ -29,6 +29,7 @@ Quiz interactif pour mémoriser les 100 correspondances nombre ↔ mot de la **t
 - 🔥 **Streak** de bonnes réponses en live
 - 📊 **Statistiques** détaillées
 - 📖 **Vue table** avec recherche et code couleur
+- 📤 **Export / import** de la table (JSON ou CSV) depuis le menu ou l’écran « Parcourir la table »
 - 🔄 **Mise à jour automatique** — place l'app dans Applications pour l'activer
 
 ---

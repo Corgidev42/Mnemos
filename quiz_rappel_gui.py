@@ -13,6 +13,7 @@ Améliorations v2 :
   - Meilleure UX globale
 """
 
+import csv
 import json
 import os
 import random
@@ -24,7 +25,7 @@ import time
 import urllib.request
 import zipfile
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import filedialog, ttk, messagebox
 
 try:
     from PIL import Image, ImageTk
@@ -33,7 +34,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
 
 # ============================================================
@@ -336,6 +337,62 @@ def load_table():
     return list(TABLE_EMBEDDED)
 
 
+def parse_imported_table_file(path):
+    """
+    Lit un fichier JSON ou CSV et retourne une liste de (nombre, mot).
+    JSON : [["0","bulle"], ...] ou [{"nombre":"0","mot":"bulle"}, ...]
+    CSV : colonnes Nombre,Mot (en-tête optionnel).
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".csv":
+        with open(path, encoding="utf-8", errors="replace") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+        if not rows:
+            raise ValueError("Fichier vide.")
+        first = [c.strip().lower() for c in rows[0][:2]]
+        if first and first[0] in ("nombre", "number", "#", "n"):
+            rows = rows[1:]
+        out = []
+        for row in rows:
+            if len(row) >= 2:
+                n, m = row[0].strip(), row[1].strip()
+                if n and m:
+                    out.append((n, m))
+        if not out:
+            raise ValueError("Aucune ligne valide (attendu : Nombre,Mot).")
+        return out
+
+    with open(path, encoding="utf-8", errors="replace") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise ValueError("JSON invalide : une liste est attendue.")
+    out = []
+    for item in data:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            n, m = str(item[0]).strip(), str(item[1]).strip()
+            if n and m:
+                out.append((n, m))
+        elif isinstance(item, dict):
+            n = str(
+                item.get("nombre")
+                or item.get("Nombre")
+                or item.get("n")
+                or ""
+            ).strip()
+            m = str(
+                item.get("mot")
+                or item.get("Mot")
+                or item.get("m")
+                or ""
+            ).strip()
+            if n and m:
+                out.append((n, m))
+    if not out:
+        raise ValueError("Aucune paire nombre / mot reconnue dans le JSON.")
+    return out
+
+
 STATS_KEY_SEP = "\x01"
 
 
@@ -590,6 +647,15 @@ class QuizApp(tk.Tk):
         self.make_button(
             bottom_frame, "📖  Parcourir la table", self.show_table_view,
             width=25,
+        ).pack(side="left", padx=5)
+
+        io_row = tk.Frame(self.container, bg=BG_DARK)
+        io_row.pack(pady=(0, 5))
+        self.make_button(
+            io_row, "📤  Exporter la table…", self._export_table_file, width=22,
+        ).pack(side="left", padx=5)
+        self.make_button(
+            io_row, "📥  Importer une table…", self._import_table_file, width=22,
         ).pack(side="left", padx=5)
 
         # Footer
@@ -1636,6 +1702,12 @@ class QuizApp(tk.Tk):
         self.make_button(
             btn_bar, "✏️  Modifier la table", self._show_edit_table,
         ).pack(side="left", padx=5)
+        self.make_button(
+            btn_bar, "📤  Exporter…", self._export_table_file,
+        ).pack(side="left", padx=5)
+        self.make_button(
+            btn_bar, "📥  Importer…", self._import_table_file,
+        ).pack(side="left", padx=5)
 
     def _filter_table(self):
         query = self.search_var.get().strip().lower()
@@ -1802,6 +1874,12 @@ class QuizApp(tk.Tk):
             accent=True,
         ).pack(side="left", padx=5)
         self.make_button(
+            btn_frame, "📤  Exporter…", self._export_table_file,
+        ).pack(side="left", padx=5)
+        self.make_button(
+            btn_frame, "📥  Importer…", self._import_table_file,
+        ).pack(side="left", padx=5)
+        self.make_button(
             btn_frame, "⬅  Retour à la table", self.show_table_view,
         ).pack(side="left", padx=5)
 
@@ -1862,6 +1940,81 @@ class QuizApp(tk.Tk):
             )
         else:
             messagebox.showinfo("Rien à faire", "Aucune modification détectée.")
+
+    def _export_table_file(self):
+        """Exporte la table en JSON ou CSV."""
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Exporter la table",
+            defaultextension=".json",
+            filetypes=[
+                ("JSON", "*.json"),
+                ("CSV", "*.csv"),
+            ],
+        )
+        if not path:
+            return
+        try:
+            if path.lower().endswith(".csv"):
+                with open(path, "w", encoding="utf-8", newline="") as f:
+                    w = csv.writer(f)
+                    w.writerow(["Nombre", "Mot"])
+                    for n, m in self.table:
+                        w.writerow([n, m])
+            else:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(
+                        [[n, m] for n, m in self.table],
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+            messagebox.showinfo(
+                "Export réussi",
+                f"{len(self.table)} paires enregistrées dans :\n{path}",
+            )
+        except OSError as e:
+            messagebox.showerror("Export", str(e))
+
+    def _import_table_file(self):
+        """Importe une table depuis JSON ou CSV."""
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Importer une table",
+            filetypes=[
+                ("JSON", "*.json"),
+                ("CSV", "*.csv"),
+                ("Tous les fichiers", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        try:
+            new_table = parse_imported_table_file(path)
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            messagebox.showerror("Import", str(e))
+            return
+        if not messagebox.askyesno(
+            "Importer la table",
+            f"Remplacer la table actuelle ({len(self.table)} paires) par "
+            f"{len(new_table)} paires importées ?\n\n"
+            "Les statistiques des paires absentes du nouveau fichier seront "
+            "supprimées. Les paires identiques (même nombre et même mot) "
+            "conservent leurs stats.",
+        ):
+            return
+        merged = {}
+        for n, m in new_table:
+            key = (n, m)
+            merged[key] = list(self.stats.get(key, [0, 0, 0.0]))
+        self.table = new_table
+        self.stats = merged
+        self._persist_table()
+        messagebox.showinfo(
+            "Import réussi",
+            f"{len(new_table)} paires chargées et enregistrées.",
+        )
+        self.show_table_view()
 
     def _persist_table(self):
         """Écrit la table modifiée en JSON."""
