@@ -17,6 +17,7 @@ import csv
 import json
 import os
 import random
+import stat
 import subprocess
 import sys
 import tempfile
@@ -34,7 +35,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.0.6"
+VERSION = "1.0.7"
 GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
 
 # ============================================================
@@ -236,6 +237,24 @@ def check_for_update(callback):
     threading.Thread(target=_do_check, daemon=True).start()
 
 
+def _ensure_macos_executables(app_bundle_path):
+    """
+    zipfile.extractall() ne restaure pas le bit d'exécution sur macOS.
+    Rend exécutables tous les fichiers dans Contents/MacOS/ (binaire principal + libs).
+    """
+    macos_dir = os.path.join(app_bundle_path, "Contents", "MacOS")
+    if not os.path.isdir(macos_dir):
+        return
+    for name in os.listdir(macos_dir):
+        p = os.path.join(macos_dir, name)
+        if os.path.isfile(p):
+            try:
+                mode = os.stat(p).st_mode
+                os.chmod(p, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            except OSError:
+                pass
+
+
 def _install_update_self(zip_url, tag, callback):
     """
     Mise à jour automatique : télécharge le .zip, extrait, remplace l'app, relance.
@@ -273,6 +292,8 @@ def _install_update_self(zip_url, tag, callback):
                 callback(False, "Format du .zip invalide (Table de Rappel.app manquant)")
                 return
 
+            _ensure_macos_executables(extracted_app)
+
             # Script qui attend notre fin, remplace, relance
             # xattr -cr : retire quarantine/Gatekeeper qui bloque les apps téléchargées
             pid = os.getpid()
@@ -289,7 +310,9 @@ if [ -d "$NEW_APP" ]; then
   rm -rf "$APP_PATH"
   ditto "$NEW_APP" "$APP_PATH" 2>/dev/null || cp -R "$NEW_APP" "$APP_PATH"
   xattr -cr "$APP_PATH" 2>/dev/null || true
-  chmod +x "$APP_PATH/Contents/MacOS/Table de Rappel" 2>/dev/null || true
+  for f in "$APP_PATH/Contents/MacOS/"*; do
+    [ -f "$f" ] && chmod +x "$f" 2>/dev/null || true
+  done
   open "$APP_PATH"
 fi
 rm -rf "$CACHE_DIR"
