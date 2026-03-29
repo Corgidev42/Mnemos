@@ -35,7 +35,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.0.7"
+VERSION = "1.0.8"
 GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
 
 # ============================================================
@@ -78,8 +78,14 @@ FONT_QUESTION = (_FONT, 21)
 FONT_INPUT = (_FONT, 19)
 FONT_STREAK = (_FONT, 15, "bold")
 
-# Auto-avance (ms) après une bonne réponse
-AUTO_ADVANCE_MS = 1200
+# Auto-avance par défaut (ms) — surchargé par preferences.json (0 = désactivé)
+DEFAULT_AUTO_ADVANCE_CORRECT_MS = 1200
+DEFAULT_AUTO_ADVANCE_WRONG_MS = 0
+
+DEFAULT_PREFERENCES = {
+    "auto_advance_correct_ms": DEFAULT_AUTO_ADVANCE_CORRECT_MS,
+    "auto_advance_wrong_ms": DEFAULT_AUTO_ADVANCE_WRONG_MS,
+}
 
 # ============================================================
 # Données — table intégrée, stats en JSON (plus de CSV externe)
@@ -158,6 +164,47 @@ def _stats_path():
 
 def _table_path():
     return os.path.join(_get_app_support_dir(), "table.json")
+
+
+def _prefs_path():
+    return os.path.join(_get_app_support_dir(), "preferences.json")
+
+
+def load_preferences():
+    """Charge les préférences (auto-avance, etc.)."""
+    prefs = dict(DEFAULT_PREFERENCES)
+    path = _prefs_path()
+    if not os.path.isfile(path):
+        return prefs
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return prefs
+        for key in DEFAULT_PREFERENCES:
+            if key not in data:
+                continue
+            try:
+                v = int(data[key])
+            except (TypeError, ValueError):
+                continue
+            prefs[key] = max(0, min(120_000, v))
+    except (OSError, json.JSONDecodeError):
+        pass
+    return prefs
+
+
+def save_preferences(prefs):
+    """Enregistre les préférences sur disque."""
+    out = {k: int(prefs.get(k, DEFAULT_PREFERENCES[k])) for k in DEFAULT_PREFERENCES}
+    for k in out:
+        out[k] = max(0, min(120_000, out[k]))
+    path = _prefs_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    return out
 
 
 # ============================================================
@@ -475,6 +522,7 @@ class QuizApp(tk.Tk):
         # Données
         self.table = load_table()
         self.stats = load_stats(self.table)
+        self.preferences = load_preferences()
 
         # Variables de quiz
         self.questions = []
@@ -671,6 +719,9 @@ class QuizApp(tk.Tk):
             bottom_frame, "📖  Parcourir la table", self.show_table_view,
             width=25,
         ).pack(side="left", padx=5)
+        self.make_button(
+            bottom_frame, "⚙️  Préférences", self.show_preferences, width=18,
+        ).pack(side="left", padx=5)
 
         io_row = tk.Frame(self.container, bg=BG_DARK)
         io_row.pack(pady=(0, 5))
@@ -696,6 +747,80 @@ class QuizApp(tk.Tk):
         )
         upd_lbl.pack(side="left")
         upd_lbl.bind("<Button-1>", lambda e: self._check_update())
+
+    def show_preferences(self):
+        """Réglages : délais d'auto-avance après bonne / mauvaise réponse (ms, 0 = off)."""
+        self.clear()
+        self._unbind_menu_keys()
+
+        tk.Label(
+            self.container, text="⚙️ Préférences", font=FONT_TITLE,
+            bg=BG_DARK, fg=FG_ACCENT,
+        ).pack(pady=(25, 8))
+        tk.Label(
+            self.container,
+            text="Délai avant passage automatique (en millisecondes). "
+                 "0 = désactivé : tu dois cliquer ou valider avec Entrée.",
+            font=FONT_BODY, bg=BG_DARK, fg=FG_SECONDARY, wraplength=640,
+        ).pack(pady=(0, 20))
+
+        card = self.make_card(self.container)
+        card.pack(padx=80, fill="x", pady=5)
+
+        def row(parent, label, default_ms):
+            fr = tk.Frame(parent, bg=BG_CARD)
+            fr.pack(fill="x", pady=10)
+            tk.Label(
+                fr, text=label, font=FONT_BODY, bg=BG_CARD,
+                fg=FG_PRIMARY, wraplength=520, justify="left",
+            ).pack(anchor="w")
+            sp = tk.Spinbox(
+                fr, from_=0, to=120000, increment=100, width=10,
+                font=FONT_BODY, bg=BG_INPUT, fg=FG_PRIMARY,
+                insertbackground=FG_PRIMARY, buttonbackground=BTN_BG,
+            )
+            sp.delete(0, "end")
+            sp.insert(0, str(default_ms))
+            sp.pack(anchor="w", pady=(6, 0))
+            return sp
+
+        sp_ok = row(
+            card,
+            "Après une bonne réponse (avant la question suivante). "
+            "Par défaut 1200 ms (1,2 s).",
+            self.preferences.get(
+                "auto_advance_correct_ms", DEFAULT_AUTO_ADVANCE_CORRECT_MS,
+            ),
+        )
+        sp_bad = row(
+            card,
+            "Après une mauvaise réponse. 0 par défaut : pas d’auto-avance.",
+            self.preferences.get(
+                "auto_advance_wrong_ms", DEFAULT_AUTO_ADVANCE_WRONG_MS,
+            ),
+        )
+
+        def _save_prefs():
+            try:
+                ok_ms = int(sp_ok.get().strip() or "0")
+                bad_ms = int(sp_bad.get().strip() or "0")
+            except ValueError:
+                messagebox.showerror("Préférences", "Valeurs invalides (entiers).")
+                return
+            self.preferences = save_preferences({
+                "auto_advance_correct_ms": ok_ms,
+                "auto_advance_wrong_ms": bad_ms,
+            })
+            messagebox.showinfo("Préférences", "Réglages enregistrés.")
+
+        btn_bar = tk.Frame(self.container, bg=BG_DARK)
+        btn_bar.pack(pady=(22, 12))
+        self.make_button(btn_bar, "💾  Enregistrer", _save_prefs, accent=True).pack(
+            side="left", padx=5,
+        )
+        self.make_button(btn_bar, "⬅  Retour au menu", self.show_main_menu).pack(
+            side="left", padx=5,
+        )
 
     def _draw_rounded_rect(self, canvas, x1, y1, x2, y2, fill, r=4):
         """Dessine un rectangle aux coins arrondis."""
@@ -1214,15 +1339,28 @@ class QuizApp(tk.Tk):
         self.bind("<Return>", lambda e: btn_cmd())
         btn.focus_set()
 
-        # Auto-avance si correct
-        if correct and self.current_q < total:
-            # Countdown label
-            countdown_lbl = tk.Label(
-                self.container, text=f"Suite automatique…",
+        delay_ok = int(self.preferences.get(
+            "auto_advance_correct_ms", DEFAULT_AUTO_ADVANCE_CORRECT_MS,
+        ))
+        delay_bad = int(self.preferences.get(
+            "auto_advance_wrong_ms", DEFAULT_AUTO_ADVANCE_WRONG_MS,
+        ))
+
+        if correct and delay_ok > 0 and self.current_q < total:
+            tk.Label(
+                self.container, text="Suite automatique…",
                 font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
-            )
-            countdown_lbl.pack()
-            self._auto_advance_id = self.after(AUTO_ADVANCE_MS, btn_cmd)
+            ).pack()
+            self._auto_advance_id = self.after(delay_ok, btn_cmd)
+        elif (
+            not correct
+            and delay_bad > 0
+        ):
+            tk.Label(
+                self.container, text="Suite automatique…",
+                font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
+            ).pack()
+            self._auto_advance_id = self.after(delay_bad, btn_cmd)
 
     # --------------------------------------------------------
     # Écran : Résultats du quiz
