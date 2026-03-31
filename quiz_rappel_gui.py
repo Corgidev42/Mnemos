@@ -35,7 +35,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.0.8"
+VERSION = "1.0.9"
 GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
 
 # ============================================================
@@ -2044,6 +2044,13 @@ class QuizApp(tk.Tk):
             btn_frame, "⬅  Retour à la table", self.show_table_view,
         ).pack(side="left", padx=5)
 
+    def _reset_stats_on_mot_change(self, nombre, old_mot, new_mot):
+        """Nouvelle association nombre ↔ mot : les stats passées ne s'appliquent plus."""
+        old_key = (nombre, old_mot)
+        new_key = (nombre, new_mot)
+        self.stats.pop(old_key, None)
+        self.stats[new_key] = [0, 0, 0.0]
+
     def _save_one_entry(self, nombre, var, row_frame):
         """Sauvegarde un seul mot modifié."""
         new_mot = var.get().strip()
@@ -2057,14 +2064,7 @@ class QuizApp(tk.Tk):
                 if new_mot != old_mot:
                     # Mettre à jour la table
                     self.table[idx] = (nombre, new_mot)
-
-                    # Transférer les stats
-                    old_key = (nombre, old_mot)
-                    new_key = (nombre, new_mot)
-                    if old_key in self.stats:
-                        self.stats[new_key] = self.stats.pop(old_key)
-                    elif new_key not in self.stats:
-                        self.stats[new_key] = [0, 0, 0.0]
+                    self._reset_stats_on_mot_change(nombre, old_mot, new_mot)
 
                     # Flash vert pour confirmer
                     row_frame.configure(bg=FG_GREEN)
@@ -2083,12 +2083,7 @@ class QuizApp(tk.Tk):
                 new_mot = var.get().strip()
                 if new_mot and new_mot != old_mot:
                     self.table[idx] = (nombre, new_mot)
-                    old_key = (nombre, old_mot)
-                    new_key = (nombre, new_mot)
-                    if old_key in self.stats:
-                        self.stats[new_key] = self.stats.pop(old_key)
-                    elif new_key not in self.stats:
-                        self.stats[new_key] = [0, 0, 0.0]
+                    self._reset_stats_on_mot_change(nombre, old_mot, new_mot)
                     changes += 1
 
         self._persist_table()
