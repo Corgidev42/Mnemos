@@ -13,13 +13,20 @@ Améliorations v2 :
   - Meilleure UX globale
 """
 
+# os/sys en premier : variables d'environnement Tk doivent être posées avant
+# l'import de _tkinter, sinon Tcl/Tk 9 peut appeler Tk_CreateConsoleWindow au
+# démarrage et déclencher une assertion AppKit sur macOS (menu principal).
+import os
+import sys
+
+if sys.platform == "darwin":
+    os.environ.setdefault("TK_NO_CONSOLE", "1")
+
 import csv
 import json
-import os
 import random
 import stat
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -35,7 +42,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.0.9"
+VERSION = "1.0.10"
 GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
 
 # ============================================================
