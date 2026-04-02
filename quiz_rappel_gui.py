@@ -42,7 +42,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.0.10"
+VERSION = "1.3.0"
 GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
 
 # ============================================================
