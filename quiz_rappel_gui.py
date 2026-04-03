@@ -60,7 +60,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.4.3"
+VERSION = "1.4.4"
 # Nom produit (mnémoniques / système majeur)
 APP_NAME = "Mnémos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"

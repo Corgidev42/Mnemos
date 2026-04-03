@@ -10,7 +10,7 @@ VERSION := $(shell grep -E '^VERSION = ' $(GUI) | cut -d'"' -f2)
 DMG     := dist/Mnémos-$(VERSION).dmg
 ZIP     := dist/Mnémos-$(VERSION).zip
 
-.PHONY: run check clean reset dmg tag release publish help
+.PHONY: run check clean clean-build reset dmg tag release publish help
 
 ## run : Lance l'application
 run:
@@ -28,6 +28,16 @@ clean:
 	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	@echo "✅ Nettoyé"
+
+## clean-build : Supprime les vieux artefacts PyInstaller (Majeur, Table de Rappel, TableDeRappel-*) et tout build/
+clean-build:
+	@echo "🧹 Suppression des anciens noms dans build/ et dist/…"
+	@rm -rf build
+	@rm -rf "dist/Table de Rappel" "dist/Table de Rappel.app" 2>/dev/null || true
+	@rm -rf dist/Majeur dist/Majeur.app 2>/dev/null || true
+	@rm -f dist/Majeur-*.dmg dist/Majeur-*.zip 2>/dev/null || true
+	@rm -f dist/TableDeRappel-*.dmg dist/TableDeRappel-*.zip 2>/dev/null || true
+	@echo "✅ Fait (les builds Mnémos actuels dans dist/ sont conservés ; supprime-les à la main si besoin)"
 
 ## dmg : Crée l'app .app, le .dmg et le .zip (macOS)
 dmg:

@@ -9,6 +9,18 @@
 set -e
 cd "$(dirname "$0")/.."
 
+# Signature ad hoc + nettoyage xattr : évite le faux message macOS
+# « L'application est endommagée » sur les bundles PyInstaller non notariés.
+sign_macos_app() {
+  local app="$1"
+  [ -d "$app" ] || return 0
+  if command -v codesign &>/dev/null; then
+    echo "🔏 Signature ad hoc : $app"
+    codesign --force --deep --sign - "$app" || true
+  fi
+  xattr -cr "$app" 2>/dev/null || true
+}
+
 APP_NAME="Mnémos"
 DIST="dist"
 DMG_DIR="$DIST/dmg"
@@ -44,7 +56,7 @@ fi
 if [ -d "$DIST/$APP_NAME.app" ]; then
     APP_PATH="$DIST/$APP_NAME.app"
 elif [ -d "$DIST/$APP_NAME" ]; then
-    if [ -f "$DIST/$APP_NAME/$APP_NAME" ] || [ -f "$DIST/$APP_NAME/Majeur" ] || [ -f "$DIST/$APP_NAME/Mnémos" ]; then
+    if [ -f "$DIST/$APP_NAME/$APP_NAME" ] || [ -f "$DIST/$APP_NAME/Mnémos" ]; then
         mv "$DIST/$APP_NAME" "$DIST/$APP_NAME.app"
         APP_PATH="$DIST/$APP_NAME.app"
     else
@@ -57,6 +69,7 @@ else
 fi
 
 echo "✅ App créée : $APP_PATH"
+sign_macos_app "$APP_PATH"
 echo ""
 
 # 2. Créer le .dmg
@@ -64,6 +77,7 @@ echo "💿 Création du .dmg…"
 mkdir -p "$DMG_DIR"
 rm -rf "$DMG_DIR"/*
 cp -R "$APP_PATH" "$DMG_DIR/"
+sign_macos_app "$DMG_DIR/$APP_NAME.app"
 rm -f "$DMG_FILE"
 
 if command -v create-dmg &> /dev/null; then
