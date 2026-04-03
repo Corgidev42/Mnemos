@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Table de Rappel — Quiz GUI (v2)
-Interface graphique pour apprendre et réviser la table de rappel.
+Majeur — Quiz GUI (système majeur / mémoire des nombres)
+Interface pour apprendre et réviser les associations nombre ↔ image.
 Améliorations v2 :
   - Mode Flashcard (blocs, sens, auto-évaluation)
   - Raccourcis clavier (Échap, Entrée, chiffres)
@@ -42,6 +42,7 @@ if sys.platform == "darwin":
 import csv
 import json
 import random
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -59,7 +60,11 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.3.2"
+VERSION = "1.4.0"
+# Nom produit (court, évoque le « système majeur »)
+APP_NAME = "Majeur"
+APP_BUNDLE_APP = f"{APP_NAME}.app"
+RELEASE_ASSET_PREFIX = "Majeur"
 GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
 
 # ============================================================
@@ -148,8 +153,14 @@ TABLE_EMBEDDED = [
 def _icon_path():
     """Chemin de l'icône (dev ou .app)."""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return os.path.join(sys._MEIPASS, "TableDeRappel_icon.png")
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "TableDeRappel_icon.png")
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    for name in ("Majeur_icon.png", "TableDeRappel_icon.png"):
+        p = os.path.join(base, name)
+        if os.path.isfile(p):
+            return p
+    return os.path.join(base, "Majeur_icon.png")
 
 
 def _load_logo_photo(width=80):
@@ -175,7 +186,14 @@ def _load_logo_photo(width=80):
 def _get_app_support_dir():
     """Dossier des données utilisateur (dev ou .app)."""
     if getattr(sys, "frozen", False):
-        path = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "TableDeRappel")
+        root = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+        path = os.path.join(root, APP_NAME)
+        old = os.path.join(root, "TableDeRappel")
+        if not os.path.isdir(path) and os.path.isdir(old):
+            try:
+                shutil.copytree(old, path)
+            except OSError:
+                pass
     else:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".app_data")
     os.makedirs(path, exist_ok=True)
@@ -292,9 +310,13 @@ def check_for_update(callback):
                 for asset in data.get("assets", []):
                     name = asset.get("name", "")
                     url = asset.get("browser_download_url")
-                    if name.endswith(".zip") and "TableDeRappel" in name:
+                    if name.endswith(".zip") and (
+                        RELEASE_ASSET_PREFIX in name or "TableDeRappel" in name
+                    ):
                         zip_url = url
-                    elif name.endswith(".dmg") and "TableDeRappel" in name:
+                    elif name.endswith(".dmg") and (
+                        RELEASE_ASSET_PREFIX in name or "TableDeRappel" in name
+                    ):
                         dmg_url = url
                 callback(True, {
                     "tag": tag, "zip_url": zip_url, "dmg_url": dmg_url,
@@ -340,13 +362,14 @@ def _install_update_self(zip_url, tag, callback):
 
             cache_dir = os.path.join(
                 os.path.expanduser("~"),
-                "Library", "Caches", "TableDeRappel", "update",
+                "Library", "Caches", APP_NAME, "update",
             )
             os.makedirs(cache_dir, exist_ok=True)
 
             # Télécharger le .zip (User-Agent requis par GitHub)
-            zip_path = os.path.join(cache_dir, f"TableDeRappel-{tag}.zip")
-            req = urllib.request.Request(zip_url, headers={"User-Agent": "TableDeRappel-Updater/1.0"})
+            zip_path = os.path.join(cache_dir, f"{RELEASE_ASSET_PREFIX}-{tag}.zip")
+            req = urllib.request.Request(
+                zip_url, headers={"User-Agent": f"{APP_NAME}-Updater/1.0"})
             with urllib.request.urlopen(req, timeout=120) as resp:
                 with open(zip_path, "wb") as f:
                     f.write(resp.read())
@@ -357,10 +380,18 @@ def _install_update_self(zip_url, tag, callback):
             with zipfile.ZipFile(zip_path, "r") as zf:
                 zf.extractall(cache_dir)
 
-            # Le .zip contient "Table de Rappel.app" à la racine
-            extracted_app = os.path.join(cache_dir, "Table de Rappel.app")
-            if not os.path.isdir(extracted_app):
-                callback(False, "Format du .zip invalide (Table de Rappel.app manquant)")
+            # Le .zip contient l'app à la racine (nouveau nom ou ancien bundle)
+            extracted_app = None
+            for folder in (APP_BUNDLE_APP, "Table de Rappel.app"):
+                p = os.path.join(cache_dir, folder)
+                if os.path.isdir(p):
+                    extracted_app = p
+                    break
+            if not extracted_app:
+                callback(
+                    False,
+                    f"Format du .zip invalide ({APP_BUNDLE_APP} manquant)",
+                )
                 return
 
             _ensure_macos_executables(extracted_app)
@@ -388,7 +419,8 @@ if [ -d "$NEW_APP" ]; then
 fi
 rm -rf "$CACHE_DIR"
 '''
-            script_path = os.path.join(tempfile.gettempdir(), "TableDeRappel_updater.sh")
+            script_path = os.path.join(
+                tempfile.gettempdir(), f"{APP_NAME}_updater.sh")
             with open(script_path, "w") as f:
                 f.write(script)
             os.chmod(script_path, 0o755)
@@ -408,10 +440,14 @@ def download_and_open_dmg(url, callback):
 
     def _do_download():
         try:
-            dest = os.path.join(tempfile.gettempdir(), "TableDeRappel_update.dmg")
+            dest = os.path.join(
+                tempfile.gettempdir(), f"{APP_NAME}_update.dmg")
             urllib.request.urlretrieve(url, dest)
             os.system(f'open "{dest}"')
-            callback(True, "Le .dmg a été ouvert. Glisse « Table de Rappel » dans Applications.")
+            callback(
+                True,
+                f"Le .dmg a été ouvert. Glisse « {APP_NAME} » dans Applications.",
+            )
         except Exception as e:
             callback(False, str(e))
 
@@ -489,6 +525,21 @@ def parse_imported_table_file(path):
 
 STATS_KEY_SEP = "\x01"
 
+# Stats par paire : [score N→M, score M→N, temps moyen s/lettre (mot), temps moyen s/chiffre (nombre)]
+def _default_stats_row():
+    return [0, 0, 0.0, 0.0]
+
+
+def _normalize_stats_vals(vals):
+    """Migre l'ancien format [nm, mn, t] vers [nm, mn, t_nm, t_mn]."""
+    if not isinstance(vals, (list, tuple)) or len(vals) < 3:
+        return _default_stats_row()
+    s_nm = int(vals[0])
+    s_mn = int(vals[1])
+    t_nm = float(vals[2])
+    t_mn = float(vals[3]) if len(vals) >= 4 else 0.0
+    return [s_nm, s_mn, t_nm, t_mn]
+
 
 def _stats_key(nombre, mot):
     return f"{nombre}{STATS_KEY_SEP}{mot}"
@@ -505,19 +556,22 @@ def load_stats(table):
                 for key, vals in data.items():
                     if STATS_KEY_SEP in key and isinstance(vals, list) and len(vals) >= 3:
                         n, m = key.split(STATS_KEY_SEP, 1)
-                        stats[(n, m)] = [int(vals[0]), int(vals[1]), float(vals[2])]
+                        stats[(n, m)] = _normalize_stats_vals(vals)
         except (json.JSONDecodeError, TypeError):
             pass
     for nombre, mot in table:
         if (nombre, mot) not in stats:
-            stats[(nombre, mot)] = [0, 0, 0.0]
+            stats[(nombre, mot)] = _default_stats_row()
     return stats
 
 
 def save_stats(stats):
     """Sauvegarde les stats en JSON (écriture immédiate)."""
     path = _stats_path()
-    data = {_stats_key(n, m): [s_nm, s_mn, t] for (n, m), (s_nm, s_mn, t) in stats.items()}
+    data = {
+        _stats_key(n, m): [int(v[0]), int(v[1]), float(v[2]), float(v[3])]
+        for (n, m), v in stats.items()
+    }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=0)
         f.flush()
@@ -530,7 +584,7 @@ def save_stats(stats):
 class QuizApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"Table de Rappel — Quiz v{VERSION}")
+        self.title(f"{APP_NAME} — Quiz v{VERSION}")
         self.configure(bg=BG_DARK)
         self.minsize(960, 700)
         self.geometry("1000x740")
@@ -657,13 +711,13 @@ class QuizApp(tk.Tk):
         title_frame = tk.Frame(header, bg=BG_DARK)
         title_frame.pack(side="left")
         tk.Label(
-            title_frame, text="Table de Rappel",
+            title_frame, text=APP_NAME,
             font=("Helvetica Neue", 32, "bold") if sys.platform == "darwin" else ("Helvetica", 32, "bold"),
             bg=BG_DARK, fg=FG_ACCENT,
         ).pack(anchor="w")
         about_lbl = tk.Label(
             title_frame,
-            text=f"Entraîne ta mémoire avec le système majeur · v{VERSION}",
+            text=f"Système majeur — associations nombre ↔ image · v{VERSION}",
             font=FONT_SUBTITLE, bg=BG_DARK, fg=FG_SECONDARY,
             cursor="hand2",
         )
@@ -884,7 +938,7 @@ class QuizApp(tk.Tk):
         path_info = app_path if app_path else sys.executable
         messagebox.showinfo(
             "À propos",
-            f"Table de Rappel v{VERSION}\n\n"
+            f"{APP_NAME} v{VERSION}\n\n"
             f"Chemin : {path_info}\n\n"
             "(Clic pour vérifier les mises à jour)",
         )
@@ -1257,6 +1311,13 @@ class QuizApp(tk.Tk):
         else:
             if correct:
                 self.stats[(nombre, mot)][1] += 1
+                nb_ch = len(str(nombre))
+                if nb_ch > 0:
+                    tps = elapsed / nb_ch
+                    ancien = self.stats[(nombre, mot)][3]
+                    self.stats[(nombre, mot)][3] = (
+                        tps if ancien == 0 else (ancien + tps) / 2
+                    )
             else:
                 self.stats[(nombre, mot)][1] -= 1
         save_stats(self.stats)
@@ -1855,6 +1916,12 @@ class QuizApp(tk.Tk):
             self.container, text="📊 Statistiques", font=FONT_TITLE,
             bg=BG_DARK, fg=FG_ACCENT,
         ).pack(pady=(20, 5))
+        tk.Label(
+            self.container,
+            text="Temps moyen (s) : par lettre du mot (N→M) et par chiffre du "
+                 "nombre (M→N), mis à jour sur les bonnes réponses.",
+            font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY, wraplength=720,
+        ).pack(pady=(0, 8))
 
         # Tabs — use persistent sort state
         tab_frame = tk.Frame(self.container, bg=BG_DARK)
@@ -1911,7 +1978,7 @@ class QuizApp(tk.Tk):
             "Remettre toutes les stats à zéro ? Cette action est irréversible.",
         ):
             for key in self.stats:
-                self.stats[key] = [0, 0, 0.0]
+                self.stats[key] = _default_stats_row()
             save_stats(self.stats)
             self.show_stats_view()
 
@@ -1947,14 +2014,14 @@ class QuizApp(tk.Tk):
         # Header
         hdr = tk.Frame(inner, bg=BTN_BG, pady=5)
         hdr.pack(fill="x", pady=(0, 2))
-        for text, w in [("#", 4), ("Nombre", 8), ("Mot", 18),
-                        ("N→M", 6), ("M→N", 6), ("Temps/l.", 12)]:
+        for text, w in [("#", 4), ("Nombre", 7), ("Mot", 14),
+                        ("N→M", 5), ("M→N", 5), ("s/lettre", 9), ("s/ch.", 8)]:
             tk.Label(hdr, text=text, font=FONT_SMALL, bg=BTN_BG,
                      fg=FG_SECONDARY, width=w, anchor="center").pack(
                 side="left")
 
         for i, ((nombre, mot), vals) in enumerate(tri):
-            s_nm, s_mn, t = vals
+            s_nm, s_mn, t_nm, t_mn = vals
             total_score = s_nm + s_mn
             if total_score >= 4:
                 row_bg = "#0d2818"
@@ -1970,10 +2037,10 @@ class QuizApp(tk.Tk):
                      bg=row_bg, fg=FG_SECONDARY, width=4,
                      anchor="center").pack(side="left")
             tk.Label(row, text=nombre, font=FONT_BODY_BOLD,
-                     bg=row_bg, fg=FG_ACCENT, width=8,
+                     bg=row_bg, fg=FG_ACCENT, width=7,
                      anchor="center").pack(side="left")
             tk.Label(row, text=mot, font=FONT_BODY,
-                     bg=row_bg, fg=FG_PRIMARY, width=18,
+                     bg=row_bg, fg=FG_PRIMARY, width=14,
                      anchor="w").pack(side="left")
 
             nm_color = (FG_GREEN if s_nm > 0
@@ -1982,15 +2049,19 @@ class QuizApp(tk.Tk):
                         else (FG_RED if s_mn < 0 else FG_SECONDARY))
 
             tk.Label(row, text=str(s_nm), font=FONT_BODY,
-                     bg=row_bg, fg=nm_color, width=6,
+                     bg=row_bg, fg=nm_color, width=5,
                      anchor="center").pack(side="left")
             tk.Label(row, text=str(s_mn), font=FONT_BODY,
-                     bg=row_bg, fg=mn_color, width=6,
+                     bg=row_bg, fg=mn_color, width=5,
                      anchor="center").pack(side="left")
 
-            t_text = f"{t:.2f}s" if t > 0 else "—"
-            tk.Label(row, text=t_text, font=FONT_SMALL,
-                     bg=row_bg, fg=FG_SECONDARY, width=12,
+            tnm = f"{t_nm:.2f}" if t_nm > 0 else "—"
+            tmn = f"{t_mn:.2f}" if t_mn > 0 else "—"
+            tk.Label(row, text=tnm, font=FONT_SMALL,
+                     bg=row_bg, fg=FG_SECONDARY, width=9,
+                     anchor="center").pack(side="left")
+            tk.Label(row, text=tmn, font=FONT_SMALL,
+                     bg=row_bg, fg=FG_SECONDARY, width=8,
                      anchor="center").pack(side="left")
 
     # --------------------------------------------------------
@@ -2001,7 +2072,7 @@ class QuizApp(tk.Tk):
         self._unbind_menu_keys()
 
         tk.Label(
-            self.container, text="📖 Table de Rappel", font=FONT_TITLE,
+            self.container, text="📖 Ma table", font=FONT_TITLE,
             bg=BG_DARK, fg=FG_ACCENT,
         ).pack(pady=(20, 8))
 
@@ -2087,7 +2158,7 @@ class QuizApp(tk.Tk):
         for i, (nombre, mot) in enumerate(items):
             r, c = divmod(i, cols)
 
-            vals = self.stats.get((nombre, mot), [0, 0, 0.0])
+            vals = self.stats.get((nombre, mot), _default_stats_row())
             total_s = vals[0] + vals[1]
             if total_s >= 4:
                 border_color = FG_GREEN
@@ -2230,7 +2301,7 @@ class QuizApp(tk.Tk):
         old_key = (nombre, old_mot)
         new_key = (nombre, new_mot)
         self.stats.pop(old_key, None)
-        self.stats[new_key] = [0, 0, 0.0]
+        self.stats[new_key] = _default_stats_row()
 
     def _save_one_entry(self, nombre, var, row_frame):
         """Sauvegarde un seul mot modifié."""
@@ -2343,7 +2414,7 @@ class QuizApp(tk.Tk):
         merged = {}
         for n, m in new_table:
             key = (n, m)
-            merged[key] = list(self.stats.get(key, [0, 0, 0.0]))
+            merged[key] = list(self.stats.get(key, _default_stats_row()))
         self.table = new_table
         self.stats = merged
         self._persist_table()

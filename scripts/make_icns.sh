@@ -1,15 +1,15 @@
 #!/bin/bash
-# Génère TableDeRappel.icns à partir de TableDeRappel_icon.png
+# Génère Majeur.icns à partir de Majeur_icon.png
 # iconutil exige un chemin hors workspace (bug connu) → on utilise /tmp
 
 set -e
 cd "$(dirname "$0")/.."
 SCRIPT_DIR="$(pwd)"
-ICON_SRC="${SCRIPT_DIR}/TableDeRappel_icon.png"
-ICONSET="/tmp/TableDeRappel.iconset"
-ICNS_OUT="${SCRIPT_DIR}/TableDeRappel.icns"
+ICON_SRC="${SCRIPT_DIR}/Majeur_icon.png"
+ICONSET="/tmp/Majeur.iconset"
+ICNS_OUT="${SCRIPT_DIR}/Majeur.icns"
 
-[[ -f "$ICON_SRC" ]] || { echo "❌ TableDeRappel_icon.png introuvable"; exit 1; }
+[[ -f "$ICON_SRC" ]] || { echo "❌ Majeur_icon.png introuvable"; exit 1; }
 
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"
@@ -37,4 +37,4 @@ PY
 
 iconutil -c icns "$ICONSET" -o "$ICNS_OUT"
 rm -rf "$ICONSET"
-echo "✅ TableDeRappel.icns créé"
+echo "✅ Majeur.icns créé"

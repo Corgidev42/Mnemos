@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec pour Table de Rappel — génère un .app macOS
+# PyInstaller spec pour Majeur — génère un .app macOS
 
 import re
 
@@ -14,7 +14,7 @@ a = Analysis(
     ['quiz_rappel_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('TableDeRappel_icon.png', '.')],
+    datas=[('Majeur_icon.png', '.')],
     hiddenimports=['PIL', 'PIL._tkinter_finder'],
     hookspath=[],
     hooksconfig={},
@@ -33,7 +33,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Table de Rappel',
+    name='Majeur',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -54,15 +54,15 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='Table de Rappel',
+    name='Majeur',
 )
 
 # Bundle macOS avec version dans Info.plist (CFBundleShortVersionString)
 app = BUNDLE(
     coll,
-    name='Table de Rappel.app',
-    icon='TableDeRappel.icns',
-    bundle_identifier='com.TableDeRappel.app',
+    name='Majeur.app',
+    icon='Majeur.icns',
+    bundle_identifier='com.majeur.app',
     version=APP_VERSION,
     info_plist={
         'CFBundleShortVersionString': APP_VERSION,

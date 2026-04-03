@@ -1,4 +1,4 @@
-# Table de Rappel — Quiz GUI
+# Majeur — Quiz mémoire (système majeur)
 
 > Entraîne ta mémoire avec le [système majeur](https://fr.wikipedia.org/wiki/Syst%C3%A8me_majeur) grâce à une interface graphique interactive.
 
@@ -10,7 +10,7 @@
 
 ## Aperçu
 
-Quiz interactif pour mémoriser les 100 correspondances nombre ↔ mot de la **table de rappel** (système majeur). Interface tkinter avec design moderne.
+**Majeur** est un quiz pour mémoriser les correspondances nombre ↔ image (anciennement présenté sous le nom « Table de Rappel »). Interface tkinter avec design moderne.
 
 ### Fonctionnalités
 
@@ -20,14 +20,14 @@ Quiz interactif pour mémoriser les 100 correspondances nombre ↔ mot de la **t
 | 🎯 **Focus faibles** | Quiz sur les 20 correspondances les moins maîtrisées |
 | 🎲 **Aléatoire** | 20 questions tirées au hasard |
 | 📋 **Toute la table** | Quiz complet sur les 100+ correspondances |
-| 🃏 **Flashcard** | Révision sans stress — retourne les cartes à ton rythme |
+| 🃏 **Flashcard** | Blocs, sens, nombre de cartes et auto-évaluation |
 
 ### UX
 
 - ⌨️ **Raccourcis** : `1`–`5` = modes, `Échap` = menu, `Entrée` = valider
 - ⏩ **Auto-avance** après bonne réponse
 - 🔥 **Streak** de bonnes réponses en live
-- 📊 **Statistiques** détaillées
+- 📊 **Statistiques** avec temps moyen (s/lettre pour N→M, s/chiffre pour M→N) sur bonnes réponses
 - 📖 **Vue table** avec recherche et code couleur
 - 📤 **Export / import** de la table (JSON ou CSV) depuis le menu ou l’écran « Parcourir la table »
 - 🔄 **Mise à jour automatique** — place l'app dans Applications pour l'activer
@@ -52,9 +52,11 @@ pip install pillow
 
 ```bash
 git clone git@github.com:Corgidev42/TableDeRappel-v2.git
-cd TableDeRappel-v2
+cd TableDeRappel-v2   # tu peux renommer ce dossier en Majeur si tu veux
 pip install -r requirements.txt
 ```
+
+Le dépôt GitHub peut encore s’appeler `TableDeRappel-v2` ; les releases utilisent les fichiers `Majeur-*.zip` / `Majeur-*.dmg`. Tu peux renommer le dépôt en `Majeur` quand tu veux et mettre à jour `GITHUB_REPO` dans `quiz_rappel_gui.py`.
 
 ---
 
@@ -87,8 +89,9 @@ make dmg
 ```
 
 Génère dans `dist/` :
-- `TableDeRappel-X.Y.Z.dmg` — installer (glisser dans Applications)
-- `TableDeRappel-X.Y.Z.zip` — mise à jour automatique
+
+- `Majeur-X.Y.Z.dmg` — installer (glisser dans Applications)
+- `Majeur-X.Y.Z.zip` — mise à jour automatique
 
 ### Release
 
@@ -110,9 +113,9 @@ Prérequis : `gh auth login`
 ```
 .
 ├── quiz_rappel_gui.py      # Application principale
-├── TableDeRappel.spec      # Config PyInstaller
-├── TableDeRappel_icon.png  # Icône source
-├── TableDeRappel.icns      # Icône macOS (généré)
+├── Majeur.spec             # Config PyInstaller
+├── Majeur_icon.png         # Icône source
+├── Majeur.icns             # Icône macOS (généré)
 ├── scripts/
 │   ├── build_dmg.sh        # Build .app / .dmg / .zip
 │   └── make_icns.sh        # Génère l'icône .icns
@@ -121,7 +124,7 @@ Prérequis : `gh auth login`
 └── README.md
 ```
 
-Données : table intégrée dans l'app ; stats dans `~/.app_data/` (dev) ou `~/Library/Application Support/TableDeRappel/` (app).
+Données : table intégrée dans l'app ; stats dans `~/.app_data/` (dev) ou `~/Library/Application Support/Majeur/` (app). Au premier lancement de l’app renommée, les données de `TableDeRappel` sont copiées si besoin.
 
 ---
 

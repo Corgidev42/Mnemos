@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────
-# Table de Rappel — Makefile
+# Majeur — Makefile
 # ──────────────────────────────────────────────
 
 PYTHON  ?= python3
@@ -7,8 +7,8 @@ GUI     := quiz_rappel_gui.py
 STATS   := .app_data/stats.json
 
 VERSION := $(shell grep -E '^VERSION = ' $(GUI) | cut -d'"' -f2)
-DMG     := dist/TableDeRappel-$(VERSION).dmg
-ZIP     := dist/TableDeRappel-$(VERSION).zip
+DMG     := dist/Majeur-$(VERSION).dmg
+ZIP     := dist/Majeur-$(VERSION).zip
 
 .PHONY: run check clean reset dmg tag release publish help
 
@@ -50,7 +50,7 @@ release: dmg
 		gh release upload v$(VERSION) $(DMG) $(ZIP) --clobber; \
 	else \
 		gh release create v$(VERSION) $(DMG) $(ZIP) --title "v$(VERSION)" \
-			--notes "Table de Rappel v$(VERSION) — Mise à jour automatique disponible."; \
+			--notes "Majeur v$(VERSION) — Mise à jour automatique disponible."; \
 	fi
 	@echo "✅ Release v$(VERSION) : https://github.com/Corgidev42/TableDeRappel-v2/releases/tag/v$(VERSION)"
 
@@ -65,7 +65,7 @@ reset:
 ## help : Affiche cette aide
 help:
 	@echo ""
-	@echo "  Table de Rappel — Commandes disponibles"
+	@echo "  Majeur — Commandes disponibles"
 	@echo "  ────────────────────────────────────────"
 	@grep -E '^## ' Makefile | sed 's/## /  /' | sort
 	@echo ""
