@@ -26,11 +26,18 @@ fi
 # 1. PyInstaller — génère le .app (console=False dans le .spec)
 echo "📦 PyInstaller…"
 if [ -d venv ]; then
-  . venv/bin/activate
-  pip install -q pyinstaller pillow 2>/dev/null || true
-  python -m PyInstaller --noconfirm --clean Mnemos.spec
+  if [ -x venv/bin/python3 ]; then
+    PY=venv/bin/python3
+  elif [ -x venv/bin/python ]; then
+    PY=venv/bin/python
+  else
+    echo "❌ venv sans python3/python exécutable"
+    exit 1
+  fi
+  "$PY" -m pip install -q pyinstaller pillow 2>/dev/null || true
+  "$PY" -m PyInstaller --noconfirm --clean Mnemos.spec
 else
-  pyinstaller --noconfirm --clean Mnemos.spec
+  command -v pyinstaller >/dev/null 2>&1 && pyinstaller --noconfirm --clean Mnemos.spec || python3 -m PyInstaller --noconfirm --clean Mnemos.spec
 fi
 
 # PyInstaller onedir crée dist/Mnémos/ ; sur macOS c'est affiché comme .app
