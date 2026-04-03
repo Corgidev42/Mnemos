@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec pour Majeur — génère un .app macOS
+# PyInstaller spec pour Mnémos — génère un .app macOS
 
 import re
 
@@ -14,7 +14,7 @@ a = Analysis(
     ['quiz_rappel_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('Majeur_icon.png', '.')],
+    datas=[('Mnemos_icon.png', '.')],
     hiddenimports=['PIL', 'PIL._tkinter_finder'],
     hookspath=[],
     hooksconfig={},
@@ -33,7 +33,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Majeur',
+    name='Mnémos',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -54,15 +54,15 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='Majeur',
+    name='Mnémos',
 )
 
 # Bundle macOS avec version dans Info.plist (CFBundleShortVersionString)
 app = BUNDLE(
     coll,
-    name='Majeur.app',
-    icon='Majeur.icns',
-    bundle_identifier='com.majeur.app',
+    name='Mnémos.app',
+    icon='Mnemos.icns',
+    bundle_identifier='com.mnemos.app',
     version=APP_VERSION,
     info_plist={
         'CFBundleShortVersionString': APP_VERSION,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Majeur — Quiz GUI (système majeur / mémoire des nombres)
+Mnémos — Quiz GUI (système majeur / mémoire des nombres)
 Interface pour apprendre et réviser les associations nombre ↔ image.
 Améliorations v2 :
   - Mode Flashcard (blocs, sens, auto-évaluation)
@@ -60,12 +60,12 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.4.0"
-# Nom produit (court, évoque le « système majeur »)
-APP_NAME = "Majeur"
+VERSION = "1.4.1"
+# Nom produit (mnémoniques / système majeur)
+APP_NAME = "Mnémos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
-RELEASE_ASSET_PREFIX = "Majeur"
-GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
+RELEASE_ASSET_PREFIX = "Mnémos"
+GITHUB_REPO = "Corgidev42/Mnemos"
 
 # ============================================================
 # Constantes de style — thème "Memory Palace" (violet & turquoise)
@@ -156,11 +156,15 @@ def _icon_path():
         base = sys._MEIPASS
     else:
         base = os.path.dirname(os.path.abspath(__file__))
-    for name in ("Majeur_icon.png", "TableDeRappel_icon.png"):
+    for name in (
+        "Mnemos_icon.png",
+        "Majeur_icon.png",
+        "TableDeRappel_icon.png",
+    ):
         p = os.path.join(base, name)
         if os.path.isfile(p):
             return p
-    return os.path.join(base, "Majeur_icon.png")
+    return os.path.join(base, "Mnemos_icon.png")
 
 
 def _load_logo_photo(width=80):
@@ -188,12 +192,15 @@ def _get_app_support_dir():
     if getattr(sys, "frozen", False):
         root = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
         path = os.path.join(root, APP_NAME)
-        old = os.path.join(root, "TableDeRappel")
-        if not os.path.isdir(path) and os.path.isdir(old):
-            try:
-                shutil.copytree(old, path)
-            except OSError:
-                pass
+        if not os.path.isdir(path):
+            for old_name in ("Majeur", "TableDeRappel"):
+                old = os.path.join(root, old_name)
+                if os.path.isdir(old):
+                    try:
+                        shutil.copytree(old, path)
+                    except OSError:
+                        pass
+                    break
     else:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".app_data")
     os.makedirs(path, exist_ok=True)
@@ -311,11 +318,15 @@ def check_for_update(callback):
                     name = asset.get("name", "")
                     url = asset.get("browser_download_url")
                     if name.endswith(".zip") and (
-                        RELEASE_ASSET_PREFIX in name or "TableDeRappel" in name
+                        RELEASE_ASSET_PREFIX in name
+                        or "TableDeRappel" in name
+                        or "Majeur" in name
                     ):
                         zip_url = url
                     elif name.endswith(".dmg") and (
-                        RELEASE_ASSET_PREFIX in name or "TableDeRappel" in name
+                        RELEASE_ASSET_PREFIX in name
+                        or "TableDeRappel" in name
+                        or "Majeur" in name
                     ):
                         dmg_url = url
                 callback(True, {
@@ -382,7 +393,11 @@ def _install_update_self(zip_url, tag, callback):
 
             # Le .zip contient l'app à la racine (nouveau nom ou ancien bundle)
             extracted_app = None
-            for folder in (APP_BUNDLE_APP, "Table de Rappel.app"):
+            for folder in (
+                APP_BUNDLE_APP,
+                "Table de Rappel.app",
+                "Majeur.app",
+            ):
                 p = os.path.join(cache_dir, folder)
                 if os.path.isdir(p):
                     extracted_app = p

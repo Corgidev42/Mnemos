@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────
-# Majeur — Makefile
+# Mnémos — Makefile
 # ──────────────────────────────────────────────
 
 PYTHON  ?= python3
@@ -7,8 +7,8 @@ GUI     := quiz_rappel_gui.py
 STATS   := .app_data/stats.json
 
 VERSION := $(shell grep -E '^VERSION = ' $(GUI) | cut -d'"' -f2)
-DMG     := dist/Majeur-$(VERSION).dmg
-ZIP     := dist/Majeur-$(VERSION).zip
+DMG     := dist/Mnémos-$(VERSION).dmg
+ZIP     := dist/Mnémos-$(VERSION).zip
 
 .PHONY: run check clean reset dmg tag release publish help
 
@@ -50,9 +50,9 @@ release: dmg
 		gh release upload v$(VERSION) $(DMG) $(ZIP) --clobber; \
 	else \
 		gh release create v$(VERSION) $(DMG) $(ZIP) --title "v$(VERSION)" \
-			--notes "Majeur v$(VERSION) — Mise à jour automatique disponible."; \
+			--notes "Mnémos v$(VERSION) — Mise à jour automatique disponible."; \
 	fi
-	@echo "✅ Release v$(VERSION) : https://github.com/Corgidev42/TableDeRappel-v2/releases/tag/v$(VERSION)"
+	@echo "✅ Release v$(VERSION) : https://github.com/Corgidev42/Mnemos/releases/tag/v$(VERSION)"
 
 ## publish : tag + release (commit/push d'abord !)
 publish: tag release
@@ -65,7 +65,7 @@ reset:
 ## help : Affiche cette aide
 help:
 	@echo ""
-	@echo "  Majeur — Commandes disponibles"
+	@echo "  Mnémos — Commandes disponibles"
 	@echo "  ────────────────────────────────────────"
 	@grep -E '^## ' Makefile | sed 's/## /  /' | sort
 	@echo ""

@@ -1,4 +1,4 @@
-# Majeur — Quiz mémoire (système majeur)
+# Mnémos — Quiz mémoire (système majeur)
 
 > Entraîne ta mémoire avec le [système majeur](https://fr.wikipedia.org/wiki/Syst%C3%A8me_majeur) grâce à une interface graphique interactive.
 
@@ -10,7 +10,7 @@
 
 ## Aperçu
 
-**Majeur** est un quiz pour mémoriser les correspondances nombre ↔ image (anciennement présenté sous le nom « Table de Rappel »). Interface tkinter avec design moderne.
+**Mnémos** est un quiz pour mémoriser les correspondances nombre ↔ image (anciennement « Table de Rappel », puis « Majeur »). Interface tkinter avec design moderne.
 
 ### Fonctionnalités
 
@@ -51,12 +51,12 @@ pip install pillow
 ## Installation
 
 ```bash
-git clone git@github.com:Corgidev42/TableDeRappel-v2.git
-cd TableDeRappel-v2   # tu peux renommer ce dossier en Majeur si tu veux
+git clone git@github.com:Corgidev42/Mnemos.git
+cd Mnemos
 pip install -r requirements.txt
 ```
 
-Le dépôt GitHub peut encore s’appeler `TableDeRappel-v2` ; les releases utilisent les fichiers `Majeur-*.zip` / `Majeur-*.dmg`. Tu peux renommer le dépôt en `Majeur` quand tu veux et mettre à jour `GITHUB_REPO` dans `quiz_rappel_gui.py`.
+Les releases publient les fichiers `Mnémos-*.zip` / `Mnémos-*.dmg` (voir `GITHUB_REPO` dans `quiz_rappel_gui.py`).
 
 ---
 
@@ -90,8 +90,8 @@ make dmg
 
 Génère dans `dist/` :
 
-- `Majeur-X.Y.Z.dmg` — installer (glisser dans Applications)
-- `Majeur-X.Y.Z.zip` — mise à jour automatique
+- `Mnémos-X.Y.Z.dmg` — installer (glisser dans Applications)
+- `Mnémos-X.Y.Z.zip` — mise à jour automatique
 
 ### Release
 
@@ -113,9 +113,9 @@ Prérequis : `gh auth login`
 ```
 .
 ├── quiz_rappel_gui.py      # Application principale
-├── Majeur.spec             # Config PyInstaller
-├── Majeur_icon.png         # Icône source
-├── Majeur.icns             # Icône macOS (généré)
+├── Mnemos.spec             # Config PyInstaller
+├── Mnemos_icon.png         # Icône source
+├── Mnemos.icns             # Icône macOS (généré)
 ├── scripts/
 │   ├── build_dmg.sh        # Build .app / .dmg / .zip
 │   └── make_icns.sh        # Génère l'icône .icns
@@ -124,7 +124,7 @@ Prérequis : `gh auth login`
 └── README.md
 ```
 
-Données : table intégrée dans l'app ; stats dans `~/.app_data/` (dev) ou `~/Library/Application Support/Majeur/` (app). Au premier lancement de l’app renommée, les données de `TableDeRappel` sont copiées si besoin.
+Données : table intégrée dans l'app ; stats dans `~/.app_data/` (dev) ou `~/Library/Application Support/Mnémos/` (app). Au premier lancement, les données de `Majeur` ou `TableDeRappel` sont copiées si besoin.
 
 ---
 

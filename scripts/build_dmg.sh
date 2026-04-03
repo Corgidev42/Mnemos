@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Majeur .app et .dmg
+# Build Mnémos .app et .dmg
 # Usage: ./scripts/build_dmg.sh
 #
 # Prérequis :
@@ -9,10 +9,10 @@
 set -e
 cd "$(dirname "$0")/.."
 
-APP_NAME="Majeur"
+APP_NAME="Mnémos"
 DIST="dist"
 DMG_DIR="$DIST/dmg"
-DMG_FILE="$DIST/Majeur-$(grep -E '^VERSION = ' quiz_rappel_gui.py | cut -d'"' -f2).dmg"
+DMG_FILE="$DIST/Mnémos-$(grep -E '^VERSION = ' quiz_rappel_gui.py | cut -d'"' -f2).dmg"
 
 echo "🔨 Build de $APP_NAME…"
 echo ""
@@ -28,16 +28,16 @@ echo "📦 PyInstaller…"
 if [ -d venv ]; then
   . venv/bin/activate
   pip install -q pyinstaller pillow 2>/dev/null || true
-  python -m PyInstaller --noconfirm --clean Majeur.spec
+  python -m PyInstaller --noconfirm --clean Mnemos.spec
 else
-  pyinstaller --noconfirm --clean Majeur.spec
+  pyinstaller --noconfirm --clean Mnemos.spec
 fi
 
-# PyInstaller onedir crée dist/Majeur/ ; sur macOS c'est affiché comme .app
+# PyInstaller onedir crée dist/Mnémos/ ; sur macOS c'est affiché comme .app
 if [ -d "$DIST/$APP_NAME.app" ]; then
     APP_PATH="$DIST/$APP_NAME.app"
 elif [ -d "$DIST/$APP_NAME" ]; then
-    if [ -f "$DIST/$APP_NAME/$APP_NAME" ] || [ -f "$DIST/$APP_NAME/Majeur" ]; then
+    if [ -f "$DIST/$APP_NAME/$APP_NAME" ] || [ -f "$DIST/$APP_NAME/Majeur" ] || [ -f "$DIST/$APP_NAME/Mnémos" ]; then
         mv "$DIST/$APP_NAME" "$DIST/$APP_NAME.app"
         APP_PATH="$DIST/$APP_NAME.app"
     else
@@ -76,10 +76,10 @@ fi
 
 # 3. Créer le .zip pour la mise à jour auto
 VERSION=$(grep -E '^VERSION = ' quiz_rappel_gui.py | cut -d'"' -f2)
-ZIP_FILE="$DIST/Majeur-${VERSION}.zip"
+ZIP_FILE="$DIST/Mnémos-${VERSION}.zip"
 echo "📦 Création du .zip (mise à jour auto)…"
 rm -f "$ZIP_FILE"
-(cd "$DIST" && zip -r "Majeur-${VERSION}.zip" "Majeur.app")
+(cd "$DIST" && zip -r "Mnémos-${VERSION}.zip" "Mnémos.app")
 
 echo ""
 echo "✅ Terminé !"
