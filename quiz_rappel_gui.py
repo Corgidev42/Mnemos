@@ -19,8 +19,25 @@ Améliorations v2 :
 import os
 import sys
 
+# Référence forte : fermer le master fermerait le slave (stdin) en EOF.
+_TK_MAC_PTY_MASTER = None
+
 if sys.platform == "darwin":
-    os.environ.setdefault("TK_NO_CONSOLE", "1")
+    # Windows / docs : évite la console Tk si supporté par le build.
+    os.environ["TK_NO_CONSOLE"] = "1"
+    # Sur macOS, Tcl/Tk 9 n'utilise pas TK_NO_CONSOLE : TkpInit ouvre la console
+    # Tk si stdin n'est pas un TTY (ex. .app sans console depuis le Finder).
+    # Tk_CreateConsoleWindow construit alors la barre de menus et peut abort()
+    # dans NSMenuItem. Attacher stdin à un pseudo-TTY évite cette branche.
+    if not os.isatty(0):
+        try:
+            import pty
+
+            _TK_MAC_PTY_MASTER, _slave = pty.openpty()
+            os.dup2(_slave, 0)
+            os.close(_slave)
+        except OSError:
+            _TK_MAC_PTY_MASTER = None
 
 import csv
 import json
@@ -42,7 +59,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
 
 # ============================================================
