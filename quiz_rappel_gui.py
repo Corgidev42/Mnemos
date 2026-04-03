@@ -60,12 +60,12 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 # Nom produit (mnémoniques / système majeur)
 APP_NAME = "Mnémos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
 RELEASE_ASSET_PREFIX = "Mnémos"
-GITHUB_REPO = "Corgidev42/Mnemos"
+GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
 
 # ============================================================
 # Constantes de style — thème "Memory Palace" (violet & turquoise)
