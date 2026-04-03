@@ -4,7 +4,7 @@
 Table de Rappel — Quiz GUI (v2)
 Interface graphique pour apprendre et réviser la table de rappel.
 Améliorations v2 :
-  - Mode Flashcard (révision sans stress)
+  - Mode Flashcard (blocs, sens, auto-évaluation)
   - Raccourcis clavier (Échap, Entrée, chiffres)
   - Auto-avance après bonne réponse
   - Streak (série) de bonnes réponses
@@ -59,7 +59,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 GITHUB_REPO = "Corgidev42/TableDeRappel-v2"
 
 # ============================================================
@@ -639,6 +639,8 @@ class QuizApp(tk.Tk):
     def show_main_menu(self):
         self.clear()
         self.unbind("<Return>")
+        for key in ("r", "f"):
+            self.unbind(key)
 
         # Header avec logo + titre
         header = tk.Frame(self.container, bg=BG_DARK)
@@ -1238,22 +1240,8 @@ class QuizApp(tk.Tk):
             self.timer_label.configure(text=f"⏱ {elapsed:.1f}s")
             self.after(100, self._update_timer)
 
-    def _submit_answer(self):
-        answer = self.answer_var.get().strip().lower()
-        if not answer:
-            return
-
-        mode, nombre, mot = self.questions[self.current_q]
-        elapsed = time.time() - self.question_start_time
-
-        if mode == "nombre->mot":
-            correct = answer == mot.lower()
-            expected = mot
-        else:
-            correct = answer == nombre
-            expected = nombre
-
-        # Mise à jour des stats
+    def _apply_answer_stats(self, mode, nombre, mot, correct, elapsed):
+        """Met à jour les compteurs / temps moyen pour une paire (quiz ou flashcard)."""
         if mode == "nombre->mot":
             if correct:
                 self.stats[(nombre, mot)][0] += 1
@@ -1271,6 +1259,24 @@ class QuizApp(tk.Tk):
                 self.stats[(nombre, mot)][1] += 1
             else:
                 self.stats[(nombre, mot)][1] -= 1
+        save_stats(self.stats)
+
+    def _submit_answer(self):
+        answer = self.answer_var.get().strip().lower()
+        if not answer:
+            return
+
+        mode, nombre, mot = self.questions[self.current_q]
+        elapsed = time.time() - self.question_start_time
+
+        if mode == "nombre->mot":
+            correct = answer == mot.lower()
+            expected = mot
+        else:
+            correct = answer == nombre
+            expected = nombre
+
+        self._apply_answer_stats(mode, nombre, mot, correct, elapsed)
 
         if correct:
             self.score += 1
@@ -1281,9 +1287,6 @@ class QuizApp(tk.Tk):
 
         self.results.append((mode, nombre, mot, answer, correct, elapsed))
         self.question_start_time = time.time()
-
-        # Sauvegarde immédiate — stats à jour après chaque réponse
-        save_stats(self.stats)
 
         self._show_feedback(correct, expected, elapsed)
 
@@ -1496,6 +1499,16 @@ class QuizApp(tk.Tk):
     # --------------------------------------------------------
     # MODE FLASHCARD
     # --------------------------------------------------------
+    def _build_flashcard_tuples(self, pairs, sens):
+        """Liste (mode, nombre, mot) pour les cartes, selon la direction."""
+        out = []
+        for nombre, mot in pairs:
+            if sens in ("1", "3"):
+                out.append(("nombre->mot", nombre, mot))
+            if sens in ("2", "3"):
+                out.append(("mot->nombre", nombre, mot))
+        return out
+
     def start_flashcard_mode(self):
         self.clear()
         self._unbind_menu_keys()
@@ -1503,50 +1516,77 @@ class QuizApp(tk.Tk):
         tk.Label(
             self.container, text="🃏 Mode Flashcard", font=FONT_TITLE,
             bg=BG_DARK, fg=FG_MAUVE,
-        ).pack(pady=(40, 10))
+        ).pack(pady=(35, 10))
         tk.Label(
             self.container,
-            text="Révise sans pression ! Clique ou appuie sur Espace "
-                 "pour retourner la carte. (Ce mode ne modifie pas les stats)",
-            font=FONT_BODY, bg=BG_DARK, fg=FG_SECONDARY,
-        ).pack(pady=(0, 20))
+            text="Choisis les blocs, la direction et le nombre de cartes. "
+                 "Retourne la carte, puis indique si tu l’avais bien mémorisée "
+                 "(les stats sont mises à jour).",
+            font=FONT_BODY, bg=BG_DARK, fg=FG_SECONDARY, wraplength=640,
+        ).pack(pady=(0, 18))
 
-        # Options de blocs (simplifié)
         card = self.make_card(self.container)
-        card.pack(padx=100, fill="x")
+        card.pack(padx=80, fill="x")
 
-        tk.Label(card, text="Plage de nombres :", font=FONT_BODY_BOLD,
-                 bg=BG_CARD, fg=FG_PRIMARY).pack(anchor="w")
+        tk.Label(
+            card,
+            text="Blocs à inclure :",
+            font=FONT_BODY, bg=BG_CARD, fg=FG_SECONDARY,
+        ).pack(anchor="w", pady=(5, 8))
 
-        range_frame = tk.Frame(card, bg=BG_CARD)
-        range_frame.pack(fill="x", pady=5)
+        blocs_frame = tk.Frame(card, bg=BG_CARD)
+        blocs_frame.pack(pady=5)
+        self.fc_bloc_vars = {}
+        for i in range(11):
+            start = i * 10
+            end = min(start + 9, 100)
+            var = tk.BooleanVar(value=False)
+            self.fc_bloc_vars[i] = var
+            tk.Checkbutton(
+                blocs_frame, text=f"  {start:>3}–{end}", variable=var,
+                font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_PRIMARY,
+                selectcolor=CHECK_BG, activebackground=BG_CARD,
+                activeforeground=CHECK_ON, highlightthickness=0,
+                indicatoron=True, onvalue=True, offvalue=False,
+            ).grid(row=i // 4, column=i % 4, padx=12, pady=5, sticky="w")
 
-        tk.Label(range_frame, text="De", font=FONT_BODY,
-                 bg=BG_CARD, fg=FG_SECONDARY).pack(side="left", padx=(0, 5))
-        self.fc_start_var = tk.StringVar(value="0")
+        quick_frame = tk.Frame(card, bg=BG_CARD)
+        quick_frame.pack(pady=(4, 2))
+        self.make_button(
+            quick_frame, "Tout sélectionner", self._fc_select_all_blocs, width=18,
+        ).pack(side="left", padx=5)
+        self.make_button(
+            quick_frame, "Tout désélectionner", self._fc_deselect_all_blocs,
+            width=18,
+        ).pack(side="left", padx=5)
+
+        self._add_direction_picker(card)
+
+        nb_row = tk.Frame(card, bg=BG_CARD)
+        nb_row.pack(pady=(14, 6), fill="x")
+        tk.Label(
+            nb_row, text="Nombre de cartes :",
+            font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_PRIMARY,
+        ).pack(side="left", padx=(0, 12))
+        self.fc_count_var = tk.StringVar(value="20")
         tk.Entry(
-            range_frame, textvariable=self.fc_start_var, font=FONT_BODY,
+            nb_row, textvariable=self.fc_count_var, font=FONT_BODY,
             bg=BG_INPUT, fg=FG_PRIMARY, insertbackground=FG_PRIMARY,
-            relief="flat", width=6, justify="center",
-        ).pack(side="left", ipady=3)
+            relief="flat", width=8, justify="center",
+        ).pack(side="left", ipady=4)
+        tk.Label(
+            nb_row,
+            text="  (tirage parmi les cartes possibles selon blocs + sens)",
+            font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
+        ).pack(side="left", padx=(10, 0))
 
-        tk.Label(range_frame, text="  à  ", font=FONT_BODY,
-                 bg=BG_CARD, fg=FG_SECONDARY).pack(side="left")
-        self.fc_end_var = tk.StringVar(value="100")
-        tk.Entry(
-            range_frame, textvariable=self.fc_end_var, font=FONT_BODY,
-            bg=BG_INPUT, fg=FG_PRIMARY, insertbackground=FG_PRIMARY,
-            relief="flat", width=6, justify="center",
-        ).pack(side="left", ipady=3)
-
-        # Mélanger ?
         self.fc_shuffle_var = tk.BooleanVar(value=True)
         tk.Checkbutton(
             card, text="  Ordre aléatoire", variable=self.fc_shuffle_var,
             font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_PRIMARY,
             selectcolor=CHECK_BG, activebackground=BG_CARD,
             activeforeground=CHECK_ON, highlightthickness=0,
-        ).pack(anchor="w", pady=5)
+        ).pack(anchor="w", pady=(6, 4))
 
         btn_frame = tk.Frame(self.container, bg=BG_DARK)
         btn_frame.pack(pady=20)
@@ -1557,135 +1597,252 @@ class QuizApp(tk.Tk):
             btn_frame, "⬅  Retour", self.show_main_menu,
         ).pack(side="left", padx=10)
 
+    def _fc_select_all_blocs(self):
+        for v in self.fc_bloc_vars.values():
+            v.set(True)
+
+    def _fc_deselect_all_blocs(self):
+        for v in self.fc_bloc_vars.values():
+            v.set(False)
+
     def _launch_flashcards(self):
-        try:
-            s = int(self.fc_start_var.get())
-            e = int(self.fc_end_var.get())
-        except ValueError:
-            messagebox.showwarning("Attention", "Plage invalide (nombres).")
+        selected = [i for i, v in self.fc_bloc_vars.items() if v.get()]
+        if not selected:
+            messagebox.showwarning(
+                "Attention", "Sélectionne au moins un bloc !")
+            return
+        pairs = []
+        for bloc_i in selected:
+            start = bloc_i * 10
+            end = min(start + 9, 100)
+            pairs.extend(
+                [p for p in self.table if start <= int(p[0]) <= end])
+        if not pairs:
+            messagebox.showwarning(
+                "Attention", "Aucune correspondance pour ces blocs.")
             return
 
-        self.fc_cards = [
-            (n, m) for n, m in self.table if s <= int(n) <= e
-        ]
-        if not self.fc_cards:
-            messagebox.showwarning("Attention", "Aucune carte dans cette plage.")
+        sens = self.sens_var.get()
+        pool = self._build_flashcard_tuples(pairs, sens)
+        if not pool:
+            messagebox.showwarning("Attention", "Aucune carte générée.")
+            return
+
+        try:
+            want = int(self.fc_count_var.get().strip())
+        except ValueError:
+            messagebox.showwarning(
+                "Attention", "Nombre de cartes invalide (entier).")
+            return
+        if want < 1:
+            messagebox.showwarning("Attention", "Il faut au moins une carte.")
             return
 
         if self.fc_shuffle_var.get():
-            random.shuffle(self.fc_cards)
+            random.shuffle(pool)
+        n = min(want, len(pool))
+        if want > len(pool):
+            messagebox.showinfo(
+                "Cartes disponibles",
+                f"Seulement {len(pool)} carte(s) possible(s) avec ces options — "
+                f"session de {len(pool)} cartes.",
+            )
+        self.fc_cards = pool[:n]
 
         self.fc_idx = 0
         self.fc_revealed = False
+        self.fc_score = 0
+        self.fc_streak = 0
+        self.fc_best_streak = 0
+        self.fc_results = []
         self._show_flashcard()
 
     def _show_flashcard(self):
         self.clear()
+        for key in ("<space>", "<Return>", "<Right>", "r", "f"):
+            self.unbind(key)
 
-        nombre, mot = self.fc_cards[self.fc_idx]
+        if not self.fc_revealed:
+            self.fc_card_t0 = time.time()
+
+        mode, nombre, mot = self.fc_cards[self.fc_idx]
         total = len(self.fc_cards)
         idx = self.fc_idx + 1
 
-        # Barre
+        top_bar = tk.Frame(self.container, bg=BG_DARK)
+        top_bar.pack(fill="x", padx=40, pady=(18, 0))
         tk.Label(
-            self.container,
-            text=f"🃏 Flashcard {idx}/{total}",
+            top_bar, text=f"🃏 Flashcard {idx}/{total}",
             font=FONT_BODY_BOLD, bg=BG_DARK, fg=FG_MAUVE,
-        ).pack(pady=(20, 5))
+        ).pack(side="left")
+        done_prev = idx - 1
+        if done_prev > 0:
+            tk.Label(
+                top_bar,
+                text=f"  Réussies : {self.fc_score}/{done_prev}",
+                font=FONT_BODY, bg=BG_DARK, fg=FG_GREEN,
+            ).pack(side="left", padx=(12, 0))
+        if self.fc_streak >= 2:
+            tk.Label(
+                top_bar, text=f"  🔥 {self.fc_streak}",
+                font=FONT_STREAK, bg=BG_DARK, fg=FG_ORANGE,
+            ).pack(side="left", padx=(8, 0))
 
         bar = tk.Canvas(self.container, height=4, bg=BTN_BG,
                         highlightthickness=0)
-        bar.pack(fill="x", padx=60, pady=(0, 10))
+        bar.pack(fill="x", padx=60, pady=(8, 10))
         self.after(50, lambda: self._draw_progress(bar, idx, total))
 
-        # Carte
         card = tk.Frame(
             self.container, bg=FG_MAUVE, padx=3, pady=3,
         )
-        card.pack(padx=120, pady=20, fill="x")
+        card.pack(padx=120, pady=16, fill="x")
 
         inner = tk.Frame(card, bg=BG_CARD, padx=30, pady=30)
         inner.pack(fill="both", expand=True)
 
+        hint = (
+            "Quel mot correspond ?" if mode == "nombre->mot" else
+            "Quel nombre correspond ?"
+        )
         tk.Label(
-            inner, text=nombre, font=FONT_BIG,
-            bg=BG_CARD, fg=FG_ACCENT,
-        ).pack(pady=(10, 15))
+            inner, text=hint, font=FONT_SMALL,
+            bg=BG_CARD, fg=FG_SECONDARY,
+        ).pack(pady=(0, 8))
 
-        if self.fc_revealed:
+        if mode == "nombre->mot":
             tk.Label(
-                inner, text="↕", font=FONT_BODY,
-                bg=BG_CARD, fg=FG_SECONDARY,
-            ).pack()
+                inner, text=nombre, font=FONT_BIG,
+                bg=BG_CARD, fg=FG_ACCENT,
+            ).pack(pady=(5, 10))
+            if self.fc_revealed:
+                tk.Label(
+                    inner, text="↕", font=FONT_BODY,
+                    bg=BG_CARD, fg=FG_SECONDARY,
+                ).pack()
+                tk.Label(
+                    inner, text=mot, font=FONT_BIG,
+                    bg=BG_CARD, fg=FG_GREEN,
+                ).pack(pady=(10, 10))
+            else:
+                tk.Label(
+                    inner, text="???", font=FONT_QUESTION,
+                    bg=BG_CARD, fg=FG_SECONDARY,
+                ).pack(pady=(10, 10))
+        else:
             tk.Label(
                 inner, text=mot, font=FONT_BIG,
                 bg=BG_CARD, fg=FG_GREEN,
-            ).pack(pady=(10, 10))
-        else:
-            tk.Label(
-                inner, text="???", font=FONT_QUESTION,
-                bg=BG_CARD, fg=FG_SECONDARY,
-            ).pack(pady=(10, 10))
+            ).pack(pady=(5, 10))
+            if self.fc_revealed:
+                tk.Label(
+                    inner, text="↕", font=FONT_BODY,
+                    bg=BG_CARD, fg=FG_SECONDARY,
+                ).pack()
+                tk.Label(
+                    inner, text=nombre, font=FONT_BIG,
+                    bg=BG_CARD, fg=FG_ACCENT,
+                ).pack(pady=(10, 10))
+            else:
+                tk.Label(
+                    inner, text="???", font=FONT_QUESTION,
+                    bg=BG_CARD, fg=FG_SECONDARY,
+                ).pack(pady=(10, 10))
 
-        # Boutons
         btn_frame = tk.Frame(self.container, bg=BG_DARK)
-        btn_frame.pack(pady=10)
+        btn_frame.pack(pady=12)
 
         if not self.fc_revealed:
             btn = self.make_button(
                 btn_frame, "Retourner (Espace)",
-                self._reveal_flashcard, accent=True, width=22,
+                self._reveal_flashcard, accent=True, width=24,
             )
             btn.pack()
             btn.focus_set()
             self.bind("<space>", lambda e: self._reveal_flashcard())
             self.bind("<Return>", lambda e: self._reveal_flashcard())
         else:
-            self.unbind("<space>")
-            self.unbind("<Return>")
+            ok_btn = self.make_button(
+                btn_frame, "✓  J’avais bon",
+                lambda: self._flashcard_self_rate(True), accent=True, width=18,
+            )
+            ok_btn.pack(side="left", padx=6)
+            bad_btn = self.make_button(
+                btn_frame, "✗  Je me suis trompé",
+                lambda: self._flashcard_self_rate(False), danger=True, width=22,
+            )
+            bad_btn.pack(side="left", padx=6)
+            ok_btn.focus_set()
+            self.bind("r", lambda e: self._flashcard_self_rate(True))
+            self.bind("f", lambda e: self._flashcard_self_rate(False))
+            self.bind("<Return>", lambda e: self._flashcard_self_rate(True))
 
-            if self.fc_idx < total - 1:
-                next_btn = self.make_button(
-                    btn_frame, "Suivante →", self._next_flashcard,
-                    accent=True, width=15,
-                )
-                next_btn.pack(side="left", padx=5)
-                next_btn.focus_set()
-                self.bind("<Return>", lambda e: self._next_flashcard())
-                self.bind("<Right>", lambda e: self._next_flashcard())
-            else:
-                done_btn = self.make_button(
-                    btn_frame, "Terminé ✓", self.show_main_menu,
-                    accent=True, width=15,
-                )
-                done_btn.pack(side="left", padx=5)
-                done_btn.focus_set()
-                self.bind("<Return>", lambda e: self.show_main_menu())
+            tk.Label(
+                self.container,
+                text="Raccourcis : R = bon · F = raté · Entrée = bon",
+                font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
+            ).pack(pady=(4, 0))
 
-            if self.fc_idx > 0:
-                self.make_button(
-                    btn_frame, "← Précédente", self._prev_flashcard, width=15,
-                ).pack(side="left", padx=5)
-                self.bind("<Left>", lambda e: self._prev_flashcard())
-
-        # Retour
         self.make_button(
             self.container, "⬅  Retour au menu", self.show_main_menu,
-        ).pack(pady=(15, 10))
+        ).pack(pady=(14, 10))
 
     def _reveal_flashcard(self):
         self.fc_revealed = True
         self._show_flashcard()
 
-    def _next_flashcard(self):
-        self.fc_idx += 1
-        self.fc_revealed = False
-        self._show_flashcard()
+    def _flashcard_self_rate(self, correct):
+        mode, nombre, mot = self.fc_cards[self.fc_idx]
+        elapsed = time.time() - self.fc_card_t0
+        self._apply_answer_stats(mode, nombre, mot, correct, elapsed)
+        self.fc_results.append(
+            (mode, nombre, mot, "(flashcard)", correct, elapsed))
+        if correct:
+            self.fc_score += 1
+            self.fc_streak += 1
+            self.fc_best_streak = max(self.fc_best_streak, self.fc_streak)
+        else:
+            self.fc_streak = 0
 
-    def _prev_flashcard(self):
-        self.fc_idx -= 1
-        self.fc_revealed = False
-        self._show_flashcard()
+        last = self.fc_idx >= len(self.fc_cards) - 1
+        if last:
+            self._show_flashcard_end()
+        else:
+            self.fc_idx += 1
+            self.fc_revealed = False
+            self._show_flashcard()
+
+    def _show_flashcard_end(self):
+        self.clear()
+        for key in ("<space>", "<Return>", "<Right>", "r", "f"):
+            self.unbind(key)
+
+        total = len(self.fc_cards)
+        good = self.fc_score
+        tk.Label(
+            self.container, text="🃏 Session terminée", font=FONT_TITLE,
+            bg=BG_DARK, fg=FG_MAUVE,
+        ).pack(pady=(50, 12))
+        tk.Label(
+            self.container,
+            text=f"Tu as indiqué {good} bonne(s) réponse(s) sur {total}.",
+            font=FONT_BODY, bg=BG_DARK, fg=FG_PRIMARY,
+        ).pack(pady=(0, 8))
+        if self.fc_best_streak >= 2:
+            tk.Label(
+                self.container,
+                text=f"Meilleure série : 🔥 {self.fc_best_streak}",
+                font=FONT_BODY_BOLD, bg=BG_DARK, fg=FG_ORANGE,
+            ).pack(pady=(0, 16))
+        row = tk.Frame(self.container, bg=BG_DARK)
+        row.pack(pady=20)
+        self.make_button(
+            row, "🃏  Nouvelle session", self.start_flashcard_mode,
+            accent=True, width=22,
+        ).pack(side="left", padx=8)
+        self.make_button(
+            row, "⬅  Menu principal", self.show_main_menu, width=20,
+        ).pack(side="left", padx=8)
 
     # --------------------------------------------------------
     # Écran : Statistiques
