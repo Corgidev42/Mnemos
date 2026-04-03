@@ -52,7 +52,7 @@ release: dmg
 		gh release create v$(VERSION) $(DMG) $(ZIP) --title "v$(VERSION)" \
 			--notes "Mnémos v$(VERSION) — Mise à jour automatique disponible."; \
 	fi
-	@echo "✅ Release v$(VERSION) : https://github.com/Corgidev42/TableDeRappel-v2/releases/tag/v$(VERSION)"
+	@echo "✅ Release v$(VERSION) : https://github.com/Corgidev42/Mnemos/releases/tag/v$(VERSION)"
 
 ## publish : tag + release (commit/push d'abord !)
 publish: tag release

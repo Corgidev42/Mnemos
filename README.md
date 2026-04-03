@@ -51,8 +51,8 @@ pip install pillow
 ## Installation
 
 ```bash
-git clone git@github.com:Corgidev42/TableDeRappel-v2.git
-cd TableDeRappel-v2
+git clone git@github.com:Corgidev42/Mnemos.git
+cd Mnemos
 pip install -r requirements.txt
 ```
 
