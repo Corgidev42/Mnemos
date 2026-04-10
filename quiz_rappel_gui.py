@@ -60,12 +60,27 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 # Nom produit (mnémoniques / système majeur)
 APP_NAME = "Mnémos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
 RELEASE_ASSET_PREFIX = "Mnémos"
 GITHUB_REPO = "Corgidev42/Mnemos"
+# Fichiers sur GitHub Releases : le build ou `gh` peut produire « Mnemos » (ASCII)
+# ou « Mnémos » (accent) — les deux doivent être reconnus pour la maj auto (.zip).
+ASSET_NAME_MARKERS = (
+    "Mnémos",
+    "Mnemos",
+    "TableDeRappel",
+    "Majeur",
+)
+
+
+def _release_asset_matches(name, ext):
+    """True si le fichier release est un .zip / .dmg de cette app (noms historiques inclus)."""
+    if not name.endswith(ext):
+        return False
+    return any(marker in name for marker in ASSET_NAME_MARKERS)
 
 # ============================================================
 # Constantes de style — thème "Memory Palace" (violet & turquoise)
@@ -322,18 +337,24 @@ def _get_app_bundle_path():
     return None
 
 
-def _can_auto_update():
+def _auto_update_eligibility():
     """
-    Vérifie si la mise à jour auto est possible.
-    Échoue si l'app tourne depuis un volume monté (ex: DMG) car on ne peut pas écraser.
+    (peut_maj_auto: bool, code: str)
+    code : '' | 'not_bundled' | 'from_dmg' — pour messages utilisateur précis.
     """
+    if not getattr(sys, "frozen", False):
+        return False, "not_bundled"
     app_path = _get_app_bundle_path()
-    if not app_path:
-        return False
-    # Ne pas tenter si l'app est sur /Volumes/ (DMG) — lecteur en lecture seule
+    if not app_path or not os.path.isdir(app_path):
+        return False, "not_bundled"
     if "/Volumes/" in app_path:
-        return False
-    return os.path.isdir(app_path)
+        return False, "from_dmg"
+    return True, ""
+
+
+def _can_auto_update():
+    """True si l'app est le .app installé (pas python, pas depuis le DMG monté)."""
+    return _auto_update_eligibility()[0]
 
 
 def check_for_update(callback):
@@ -355,17 +376,9 @@ def check_for_update(callback):
                 for asset in data.get("assets", []):
                     name = asset.get("name", "")
                     url = asset.get("browser_download_url")
-                    if name.endswith(".zip") and (
-                        RELEASE_ASSET_PREFIX in name
-                        or "TableDeRappel" in name
-                        or "Majeur" in name
-                    ):
+                    if _release_asset_matches(name, ".zip"):
                         zip_url = url
-                    elif name.endswith(".dmg") and (
-                        RELEASE_ASSET_PREFIX in name
-                        or "TableDeRappel" in name
-                        or "Majeur" in name
-                    ):
+                    elif _release_asset_matches(name, ".dmg"):
                         dmg_url = url
                 callback(True, {
                     "tag": tag, "zip_url": zip_url, "dmg_url": dmg_url,
@@ -1014,14 +1027,35 @@ class QuizApp(tk.Tk):
             zip_url = result.get("zip_url")
             dmg_url = result.get("dmg_url")
 
-            # Auto-update si .zip dispo et app installée (pas depuis DMG)
-            use_auto = zip_url and _can_auto_update()
-            msg = (
-                f"Une nouvelle version ({tag}) est disponible. Mise à jour automatique ?"
-                if use_auto
-                else f"Une nouvelle version ({tag}) est disponible. "
-                     f"Télécharger le .dmg ? (Pour la maj auto, place l'app dans Applications d'abord.)"
-            )
+            # Auto-update si .zip dispo et app PyInstaller (pas python3, pas DMG monté)
+            can_auto, auto_reason = _auto_update_eligibility()
+            use_auto = bool(zip_url) and can_auto
+            if use_auto:
+                msg = (
+                    f"Une nouvelle version ({tag}) est disponible. "
+                    f"Mise à jour automatique ?"
+                )
+            elif not zip_url:
+                msg = (
+                    f"Une nouvelle version ({tag}) est disponible. "
+                    f"Aucun fichier .zip sur la release (maj auto impossible). "
+                    f"Télécharger le .dmg pour installer à la main ?"
+                )
+            elif auto_reason == "from_dmg":
+                msg = (
+                    f"Une nouvelle version ({tag}) est disponible. "
+                    f"Tu lances l’app depuis le disque image : copie « {APP_NAME} » "
+                    f"dans Applications, puis rouvre-la depuis le dossier Applications "
+                    f"pour activer la mise à jour automatique. "
+                    f"Télécharger le .dmg maintenant ?"
+                )
+            else:
+                msg = (
+                    f"Une nouvelle version ({tag}) est disponible. "
+                    f"La mise à jour automatique ne fonctionne qu’avec l’application "
+                    f"« {APP_NAME}.app » installée (pas en lançant le script Python). "
+                    f"Télécharger le .dmg ?"
+                )
             if not messagebox.askyesno("Mise à jour disponible", msg):
                 return
 
