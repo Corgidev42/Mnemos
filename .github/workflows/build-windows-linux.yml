@@ -1,0 +1,68 @@
+# Build exécutable PyInstaller pour Windows et Linux (pas de cross-build depuis macOS).
+# Se déclenche quand une release est publiée (ex. fin de `make publish`) pour ajouter
+# les .zip Win/Linux à la même release — pas sur le seul push du tag (évite la course
+# avec la création de la release).
+name: Build Windows & Linux
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            suffix: Windows-x64
+          - os: ubuntu-latest
+            suffix: Linux-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dépendances Tk (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Vérifier tkinter
+        run: python -c "import tkinter; print('tkinter OK')"
+
+      - name: Installer PyInstaller
+        run: pip install pyinstaller pillow
+
+      - name: Build (Mnemos_ci.spec)
+        run: pyinstaller --noconfirm Mnemos_ci.spec
+
+      - name: Archive ZIP (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist\Mnemos -DestinationPath Mnemos-${{ matrix.suffix }}.zip -Force
+
+      - name: Archive ZIP (Linux)
+        if: runner.os == 'Linux'
+        run: cd dist && zip -r ../Mnemos-${{ matrix.suffix }}.zip Mnemos
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mnemos-${{ matrix.suffix }}
+          path: Mnemos-${{ matrix.suffix }}.zip
+
+      - name: Publier sur la release GitHub
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "Mnemos-${{ matrix.suffix }}.zip" --clobber

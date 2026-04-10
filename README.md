@@ -108,6 +108,43 @@ make release
 
 Prérequis : `gh auth login`
 
+Quand la release est **publiée** sur GitHub, le workflow **Build Windows & Linux** construit en parallèle des archives `Mnemos-Windows-x64.zip` et `Mnemos-Linux-x64.zip` et les ajoute à la même release (quelques minutes après le `.dmg` / `.zip` macOS).
+
+---
+
+## Windows et Linux
+
+PyInstaller **ne croise pas** les plateformes : on ne peut pas générer un `.exe` depuis macOS. Deux approches :
+
+### Pour tes ami·e·s (binaires)
+
+1. Va sur [Releases](https://github.com/Corgidev42/Mnemos/releases) et télécharge **`Mnemos-Windows-x64.zip`** ou **`Mnemos-Linux-x64.zip`** (ajoutés automatiquement après chaque release macOS, voir ci-dessus).
+2. **Windows** : dézippe le dossier `Mnemos`, lance **`Mnemos.exe`**. Si Windows Defender ou un antivirus signale un faux positif (fréquent avec PyInstaller), autorise l’exception ou utilise la méthode Python ci-dessous.
+3. **Linux** : dézippe, puis dans un terminal : `chmod +x Mnemos/Mnemos` et lance `./Mnemos/Mnemos`. Il faut un bureau avec affichage (X11 ou Wayland avec Tk). Sur Ubuntu/Debian, si un `.so` manque : `sudo apt install python3-tk` peut aider pour une install **source** ; le build PyInstaller embarque en principe Tk.
+
+La **mise à jour automatique** intégrée à l’app est prévue pour le **bundle macOS** ; sous Windows/Linux, il suffit de retélécharger la nouvelle release.
+
+### Méthode « source » (Python installé)
+
+```bash
+git clone https://github.com/Corgidev42/Mnemos.git && cd Mnemos
+pip install pillow
+python3 quiz_rappel_gui.py
+```
+
+Prérequis : **Python 3.9+** et **tkinter** (souvent inclus ; sinon paquet `python3-tk` sur Debian/Ubuntu).
+
+### Build manuel Win/Linux (machine locale)
+
+Sur une machine **Windows** ou **Linux** avec Python + tkinter :
+
+```bash
+pip install pyinstaller pillow
+pyinstaller --noconfirm Mnemos_ci.spec
+```
+
+Sortie dans `dist/Mnemos/` (exécutable `Mnemos` ou `Mnemos.exe`).
+
 ---
 
 ## Structure
@@ -115,9 +152,11 @@ Prérequis : `gh auth login`
 ```
 .
 ├── quiz_rappel_gui.py      # Application principale
-├── Mnemos.spec             # Config PyInstaller
+├── Mnemos.spec             # PyInstaller — bundle macOS (.app)
+├── Mnemos_ci.spec          # PyInstaller — dossier Win/Linux (CI)
 ├── Mnemos_icon.png         # Icône source
 ├── Mnemos.icns             # Icône macOS (généré)
+├── .github/workflows/      # CI : builds Windows & Linux sur release
 ├── scripts/
 │   ├── build_dmg.sh        # Build .app / .dmg / .zip
 │   └── make_icns.sh        # Génère l'icône .icns
