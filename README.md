@@ -16,9 +16,9 @@
 
 | Mode | Description |
 |------|-------------|
-| 📦 **Par bloc** | Choisis les blocs de 10 à réviser (0–9, 10–19…) |
-| 🎯 **Focus faibles** | Quiz sur les 20 correspondances les moins maîtrisées |
-| 🎲 **Aléatoire** | 20 questions tirées au hasard |
+| 📦 **Par bloc** | Blocs de 10, raccourcis 50 dizaines paires/impaires ou 50 nombres pairs/impairs |
+| 🎯 **Focus faibles** | Quiz sur les points faibles (marquage manuel + stats) |
+| 🎲 **Aléatoire** | Nombre de questions et direction au choix |
 | 📋 **Toute la table** | Quiz complet sur les 100+ correspondances |
 | 🃏 **Flashcard** | Blocs, sens, nombre de cartes et auto-évaluation |
 
@@ -28,6 +28,8 @@
 - ⏩ **Auto-avance** après bonne réponse
 - 🔥 **Streak** de bonnes réponses en live
 - 📊 **Statistiques** avec temps moyen (s/lettre pour N→M, s/chiffre pour M→N) sur bonnes réponses
+- ⏳ **Chronomètres** : temps par question / carte et temps total de session (quiz, toute la table, flashcards)
+- 🎯 **Points faibles manuels** : coches dans « Parcourir la table », repris dans le mode Focus
 - 📖 **Vue table** avec recherche et code couleur
 - 📤 **Export / import** de la table (JSON ou CSV) depuis le menu ou l’écran « Parcourir la table »
 - 🔄 **Mise à jour automatique** — place l'app dans Applications pour l'activer

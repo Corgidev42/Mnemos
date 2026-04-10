@@ -60,7 +60,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.4.4"
+VERSION = "1.5.0"
 # Nom produit (mnémoniques / système majeur)
 APP_NAME = "Mnémos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -254,6 +254,44 @@ def save_preferences(prefs):
         f.flush()
         os.fsync(f.fileno())
     return out
+
+
+def _weak_manual_path():
+    return os.path.join(_get_app_support_dir(), "weak_manual.json")
+
+
+def load_manual_weak_set(table):
+    """Ensemble (nombre, mot) marqués comme points faibles manuels."""
+    valid = {(n, m) for n, m in table}
+    out = set()
+    path = _weak_manual_path()
+    if not os.path.isfile(path):
+        return out
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return out
+        for item in data:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                n, m = str(item[0]).strip(), str(item[1]).strip()
+                if (n, m) in valid:
+                    out.add((n, m))
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    return out
+
+
+def save_manual_weak_set(manual_weak, table):
+    """Sauvegarde les points faibles manuels (liste triée pour diff stable)."""
+    valid = {(n, m) for n, m in table}
+    cleaned = sorted((n, m) for n, m in manual_weak if (n, m) in valid)
+    path = _weak_manual_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cleaned, f, ensure_ascii=False, indent=0)
+        f.flush()
+        os.fsync(f.fileno())
+    return set(cleaned)
 
 
 # ============================================================
@@ -616,6 +654,7 @@ class QuizApp(tk.Tk):
         self.table = load_table()
         self.stats = load_stats(self.table)
         self.preferences = load_preferences()
+        self.manual_weak = load_manual_weak_set(self.table)
 
         # Variables de quiz
         self.questions = []
@@ -788,7 +827,7 @@ class QuizApp(tk.Tk):
         modes = [
             ("1", "📦  Quiz par bloc", self.show_bloc_config),
             ("2", "🎯  Focus points faibles", self.start_focus_mode),
-            ("3", "🎲  Quiz aléatoire (20 Q)", self.start_random_mode),
+            ("3", "🎲  Quiz aléatoire", self.start_random_mode),
             ("4", "📋  Toute la table", self.start_full_mode),
             ("5", "🃏  Mode Flashcard", self.start_flashcard_mode),
         ]
@@ -1062,6 +1101,33 @@ class QuizApp(tk.Tk):
             width=18,
         ).pack(side="left", padx=5)
 
+        tens_frame = tk.Frame(card, bg=BG_CARD)
+        tens_frame.pack(pady=(6, 2))
+        tk.Label(
+            tens_frame, text="Sélection rapide :",
+            font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
+        ).pack(anchor="w", pady=(0, 4))
+        row_a = tk.Frame(tens_frame, bg=BG_CARD)
+        row_a.pack(fill="x")
+        self.make_button(
+            row_a, "50 diz. paires (0,20…80)", self._select_even_tens_blocs,
+            width=22,
+        ).pack(side="left", padx=4, pady=2)
+        self.make_button(
+            row_a, "50 diz. impaires (10…90)", self._select_odd_tens_blocs,
+            width=22,
+        ).pack(side="left", padx=4, pady=2)
+        row_b = tk.Frame(tens_frame, bg=BG_CARD)
+        row_b.pack(fill="x")
+        self.make_button(
+            row_b, "50 nombres pairs (0–98)", self._start_quiz_even_numbers,
+            width=24,
+        ).pack(side="left", padx=4, pady=2)
+        self.make_button(
+            row_b, "50 nombres impairs (1–99)", self._start_quiz_odd_numbers,
+            width=24,
+        ).pack(side="left", padx=4, pady=2)
+
         # Direction
         self._add_direction_picker(card)
 
@@ -1081,6 +1147,42 @@ class QuizApp(tk.Tk):
     def _deselect_all_blocs(self):
         for v in self.bloc_vars.values():
             v.set(False)
+
+    def _select_even_tens_blocs(self):
+        """Blocs 0–9, 20–29, … 80–89 (dizaines paires)."""
+        for i, v in self.bloc_vars.items():
+            v.set(i in (0, 2, 4, 6, 8))
+
+    def _select_odd_tens_blocs(self):
+        """Blocs 10–19, … 90–99 (dizaines impaires)."""
+        for i, v in self.bloc_vars.items():
+            v.set(i in (1, 3, 5, 7, 9))
+
+    def _start_quiz_even_numbers(self):
+        pairs = [
+            p for p in self.table
+            if int(p[0]) < 100 and int(p[0]) % 2 == 0
+        ]
+        if not pairs:
+            messagebox.showwarning(
+                "Attention",
+                "Aucune paire nombre pair 0–98 dans la table.",
+            )
+            return
+        self._build_questions(pairs)
+
+    def _start_quiz_odd_numbers(self):
+        pairs = [
+            p for p in self.table
+            if int(p[0]) < 100 and int(p[0]) % 2 != 0
+        ]
+        if not pairs:
+            messagebox.showwarning(
+                "Attention",
+                "Aucune paire nombre impair 1–99 dans la table.",
+            )
+            return
+        self._build_questions(pairs)
 
     def _add_direction_picker(self, parent):
         """Widget de sélection de direction réutilisable."""
@@ -1125,16 +1227,87 @@ class QuizApp(tk.Tk):
         self._show_sens_then_start(self._do_start_focus)
 
     def _do_start_focus(self):
+        manual = [p for p in self.manual_weak if p in self.stats]
         tri = sorted(self.stats.items(),
                      key=lambda x: x[1][0] + x[1][1])
-        faibles = [k for k, v in tri[:20]]
-        self._build_questions(faibles)
+        seen = set(manual)
+        pool = list(manual)
+        for k, _v in tri:
+            if len(pool) >= 20:
+                break
+            if k in seen:
+                continue
+            pool.append(k)
+            seen.add(k)
+        if not pool:
+            messagebox.showwarning(
+                "Attention",
+                "Aucune paire à réviser (stats ou points faibles manuels).",
+            )
+            return
+        self._build_questions(pool)
 
     def start_random_mode(self):
-        self._show_sens_then_start(self._do_start_random)
+        self._show_random_config()
+
+    def _show_random_config(self):
+        self.clear()
+        self._unbind_menu_keys()
+
+        tk.Label(
+            self.container, text="🎲 Quiz aléatoire", font=FONT_TITLE,
+            bg=BG_DARK, fg=FG_ACCENT,
+        ).pack(pady=(60, 20))
+
+        card = self.make_card(self.container)
+        card.pack(padx=120)
+
+        row_n = tk.Frame(card, bg=BG_CARD)
+        row_n.pack(fill="x", pady=(8, 12))
+        tk.Label(
+            row_n, text="Nombre de questions :",
+            font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_PRIMARY,
+        ).pack(side="left", padx=(0, 10))
+        self.random_n_var = tk.StringVar(value="20")
+        tk.Entry(
+            row_n, textvariable=self.random_n_var, font=FONT_BODY,
+            bg=BG_INPUT, fg=FG_PRIMARY, insertbackground=FG_PRIMARY,
+            relief="flat", width=8, justify="center",
+        ).pack(side="left", ipady=4)
+        tk.Label(
+            row_n,
+            text="  (tirage avec remise dans la table)",
+            font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
+        ).pack(side="left", padx=(10, 0))
+
+        self._add_direction_picker(card)
+
+        btn_frame = tk.Frame(self.container, bg=BG_DARK)
+        btn_frame.pack(pady=30)
+        self.make_button(
+            btn_frame, "🚀  Lancer", self._do_start_random,
+            accent=True,
+        ).pack(side="left", padx=10)
+        self.make_button(
+            btn_frame, "⬅  Retour", self.show_main_menu,
+        ).pack(side="left", padx=10)
 
     def _do_start_random(self):
-        pairs = [random.choice(self.table) for _ in range(20)]
+        try:
+            nq = int(self.random_n_var.get().strip())
+        except (ValueError, AttributeError):
+            messagebox.showwarning(
+                "Attention", "Nombre de questions invalide (entier).")
+            return
+        if nq < 1:
+            messagebox.showwarning(
+                "Attention", "Il faut au moins une question.")
+            return
+        if nq > 500:
+            messagebox.showwarning(
+                "Attention", "Maximum 500 questions pour cette session.")
+            return
+        pairs = [random.choice(self.table) for _ in range(nq)]
         self._build_questions(pairs)
 
     def start_full_mode(self):
@@ -1238,7 +1411,13 @@ class QuizApp(tk.Tk):
             tk.Label(
                 top_bar, text=f"Score : {self.score}/{idx - 1}",
                 font=FONT_BODY, bg=BG_DARK, fg=FG_GREEN,
-            ).pack(side="right")
+            ).pack(side="right", padx=(0, 12))
+
+        self.session_timer_label = tk.Label(
+            top_bar, text="⏳ Session : 0.0s",
+            font=FONT_BODY_BOLD, bg=BG_DARK, fg=FG_ORANGE,
+        )
+        self.session_timer_label.pack(side="right")
 
         # Progress bar
         bar = tk.Canvas(self.container, height=6, bg=BTN_BG,
@@ -1292,7 +1471,7 @@ class QuizApp(tk.Tk):
             bg=BG_DARK, fg=FG_SECONDARY,
         )
         self.timer_label.pack(pady=(12, 0))
-        self._update_timer()
+        self._update_quiz_timers()
 
     def _draw_progress(self, canvas, current, total):
         canvas.update_idletasks()
@@ -1303,11 +1482,22 @@ class QuizApp(tk.Tk):
         if fill_w > 0:
             self._draw_rounded_rect(canvas, 0, 0, fill_w, h, FG_ACCENT, min(3, h // 2))
 
-    def _update_timer(self):
+    def _update_quiz_timers(self):
         if hasattr(self, "timer_label") and self.timer_label.winfo_exists():
-            elapsed = time.time() - self.question_start_time
-            self.timer_label.configure(text=f"⏱ {elapsed:.1f}s")
-            self.after(100, self._update_timer)
+            elapsed_q = time.time() - self.question_start_time
+            self.timer_label.configure(text=f"⏱ Question : {elapsed_q:.1f}s")
+        if hasattr(self, "session_timer_label") and self.session_timer_label.winfo_exists():
+            elapsed_s = time.time() - self.quiz_start_time
+            self.session_timer_label.configure(
+                text=f"⏳ Session : {elapsed_s:.1f}s",
+            )
+        if (
+            hasattr(self, "timer_label") and self.timer_label.winfo_exists()
+        ) or (
+            hasattr(self, "session_timer_label")
+            and self.session_timer_label.winfo_exists()
+        ):
+            self.after(100, self._update_quiz_timers)
 
     def _apply_answer_stats(self, mode, nombre, mot, correct, elapsed):
         """Met à jour les compteurs / temps moyen pour une paire (quiz ou flashcard)."""
@@ -1491,9 +1681,13 @@ class QuizApp(tk.Tk):
         ).pack()
         tk.Label(
             self.container,
-            text=f"{pct:.0f}%  ·  {total_time:.1f}s  ·  "
-                 f"Meilleure série : {self.best_streak} 🔥",
+            text=f"{pct:.0f}%  ·  Meilleure série : {self.best_streak} 🔥",
             font=FONT_SUBTITLE, bg=BG_DARK, fg=FG_SECONDARY,
+        ).pack(pady=(0, 6))
+        tk.Label(
+            self.container,
+            text=f"⏳ Chronomètre total de la série : {total_time:.1f}s",
+            font=FONT_BODY_BOLD, bg=BG_DARK, fg=FG_ORANGE,
         ).pack(pady=(0, 15))
 
         # Temps moyen par question
@@ -1731,6 +1925,7 @@ class QuizApp(tk.Tk):
         self.fc_streak = 0
         self.fc_best_streak = 0
         self.fc_results = []
+        self.fc_quiz_start = time.time()
         self._show_flashcard()
 
     def _show_flashcard(self):
@@ -1763,6 +1958,18 @@ class QuizApp(tk.Tk):
                 top_bar, text=f"  🔥 {self.fc_streak}",
                 font=FONT_STREAK, bg=BG_DARK, fg=FG_ORANGE,
             ).pack(side="left", padx=(8, 0))
+
+        self.fc_session_timer_lbl = tk.Label(
+            top_bar, text="⏳ Session : 0.0s",
+            font=FONT_BODY_BOLD, bg=BG_DARK, fg=FG_ORANGE,
+        )
+        self.fc_session_timer_lbl.pack(side="right", padx=(8, 0))
+        self.fc_card_timer_lbl = tk.Label(
+            top_bar, text="⏱ Carte : 0.0s",
+            font=FONT_BODY, bg=BG_DARK, fg=FG_SECONDARY,
+        )
+        self.fc_card_timer_lbl.pack(side="right")
+        self._update_flashcard_timers()
 
         bar = tk.Canvas(self.container, height=4, bg=BTN_BG,
                         highlightthickness=0)
@@ -1863,6 +2070,25 @@ class QuizApp(tk.Tk):
             self.container, "⬅  Retour au menu", self.show_main_menu,
         ).pack(pady=(14, 10))
 
+    def _update_flashcard_timers(self):
+        if hasattr(self, "fc_session_timer_lbl") and self.fc_session_timer_lbl.winfo_exists():
+            self.fc_session_timer_lbl.configure(
+                text=f"⏳ Session : {time.time() - self.fc_quiz_start:.1f}s",
+            )
+        if hasattr(self, "fc_card_timer_lbl") and self.fc_card_timer_lbl.winfo_exists():
+            t0 = getattr(self, "fc_card_t0", self.fc_quiz_start)
+            self.fc_card_timer_lbl.configure(
+                text=f"⏱ Carte : {time.time() - t0:.1f}s",
+            )
+        if (
+            hasattr(self, "fc_session_timer_lbl")
+            and self.fc_session_timer_lbl.winfo_exists()
+        ) or (
+            hasattr(self, "fc_card_timer_lbl")
+            and self.fc_card_timer_lbl.winfo_exists()
+        ):
+            self.after(100, self._update_flashcard_timers)
+
     def _reveal_flashcard(self):
         self.fc_revealed = True
         self._show_flashcard()
@@ -1895,6 +2121,7 @@ class QuizApp(tk.Tk):
 
         total = len(self.fc_cards)
         good = self.fc_score
+        total_s = time.time() - getattr(self, "fc_quiz_start", time.time())
         tk.Label(
             self.container, text="🃏 Session terminée", font=FONT_TITLE,
             bg=BG_DARK, fg=FG_MAUVE,
@@ -1903,6 +2130,11 @@ class QuizApp(tk.Tk):
             self.container,
             text=f"Tu as indiqué {good} bonne(s) réponse(s) sur {total}.",
             font=FONT_BODY, bg=BG_DARK, fg=FG_PRIMARY,
+        ).pack(pady=(0, 8))
+        tk.Label(
+            self.container,
+            text=f"⏳ Temps total de la session : {total_s:.1f}s",
+            font=FONT_SUBTITLE, bg=BG_DARK, fg=FG_SECONDARY,
         ).pack(pady=(0, 8))
         if self.fc_best_streak >= 2:
             tk.Label(
@@ -2116,6 +2348,10 @@ class QuizApp(tk.Tk):
                      fg=color).pack(side="left", padx=(0, 2))
             tk.Label(legend, text=label, font=FONT_SMALL, bg=BG_DARK,
                      fg=FG_SECONDARY).pack(side="left", padx=(0, 12))
+        tk.Label(legend, text="🎯", font=FONT_SMALL, bg=BG_DARK,
+                 fg=FG_ORANGE).pack(side="left", padx=(8, 2))
+        tk.Label(legend, text="Inclus au focus faibles", font=FONT_SMALL,
+                 bg=BG_DARK, fg=FG_SECONDARY).pack(side="left", padx=(0, 12))
 
         # Zone table
         self.table_frame = tk.Frame(self.container, bg=BG_DARK)
@@ -2136,6 +2372,14 @@ class QuizApp(tk.Tk):
         self.make_button(
             btn_bar, "📥  Importer…", self._import_table_file,
         ).pack(side="left", padx=5)
+
+    def _persist_weak_toggle(self, pair, enabled):
+        """Marque / retire une paire des points faibles manuels (mode 2)."""
+        if enabled:
+            self.manual_weak.add(pair)
+        else:
+            self.manual_weak.discard(pair)
+        self.manual_weak = save_manual_weak_set(self.manual_weak, self.table)
 
     def _filter_table(self):
         query = self.search_var.get().strip().lower()
@@ -2198,6 +2442,17 @@ class QuizApp(tk.Tk):
                 inner_cell, text=mot, font=FONT_SMALL,
                 bg=BG_CARD, fg=FG_PRIMARY,
             ).pack()
+
+            weak_var = tk.BooleanVar(value=(nombre, mot) in self.manual_weak)
+            tk.Checkbutton(
+                inner_cell, text="🎯 Point faible", variable=weak_var,
+                command=lambda p=(nombre, mot), v=weak_var: self._persist_weak_toggle(
+                    p, v.get(),
+                ),
+                font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
+                selectcolor=CHECK_BG, activebackground=BG_CARD,
+                activeforeground=FG_ORANGE, highlightthickness=0,
+            ).pack(pady=(4, 0))
 
         for c in range(cols):
             inner.columnconfigure(c, weight=1, minsize=150)
@@ -2317,6 +2572,8 @@ class QuizApp(tk.Tk):
         new_key = (nombre, new_mot)
         self.stats.pop(old_key, None)
         self.stats[new_key] = _default_stats_row()
+        self.manual_weak.discard(old_key)
+        self.manual_weak = save_manual_weak_set(self.manual_weak, self.table)
 
     def _save_one_entry(self, nombre, var, row_frame):
         """Sauvegarde un seul mot modifié."""
@@ -2432,6 +2689,10 @@ class QuizApp(tk.Tk):
             merged[key] = list(self.stats.get(key, _default_stats_row()))
         self.table = new_table
         self.stats = merged
+        self.manual_weak = save_manual_weak_set(
+            {p for p in self.manual_weak if p in set(new_table)},
+            new_table,
+        )
         self._persist_table()
         messagebox.showinfo(
             "Import réussi",
