@@ -116,7 +116,7 @@ Quand la release est **publiée** sur GitHub, le workflow **Build Windows & Linu
 
 PyInstaller **ne croise pas** les plateformes : on ne peut pas générer un `.exe` depuis macOS. Deux approches :
 
-### Pour tes ami·e·s (binaires)
+### Binaires
 
 1. Va sur [Releases](https://github.com/Corgidev42/Mnemos/releases) et télécharge **`Mnemos-Windows-x64.zip`** ou **`Mnemos-Linux-x64.zip`** (ajoutés automatiquement après chaque release macOS, voir ci-dessus).
 2. **Windows** : dézippe le dossier `Mnemos`, lance **`Mnemos.exe`**. Si Windows Defender ou un antivirus signale un faux positif (fréquent avec PyInstaller), autorise l’exception ou utilise la méthode Python ci-dessous.
