@@ -14,7 +14,10 @@ a = Analysis(
     ['quiz_rappel_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('Mnemos_icon.png', '.')],
+    datas=[
+        ('Mnemos_icon.png', '.'),
+        ('Plan_hebdomadaire_Mnemos.pdf', '.'),
+    ],
     hiddenimports=['PIL', 'PIL._tkinter_finder'],
     hookspath=[],
     hooksconfig={},

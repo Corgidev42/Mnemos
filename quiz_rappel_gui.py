@@ -60,7 +60,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 # Nom produit (mnémoniques / système majeur)
 APP_NAME = "Mnémos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -165,12 +165,21 @@ TABLE_EMBEDDED = [
 ]
 
 
+def _app_resource_dir():
+    """Dossier des ressources embarquées (script en dev, _MEIPASS sous PyInstaller)."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _weekly_plan_pdf_path():
+    """Chemin du PDF « plan de révision hebdomadaire » (nom ASCII pour le build)."""
+    return os.path.join(_app_resource_dir(), "Plan_hebdomadaire_Mnemos.pdf")
+
+
 def _icon_path():
     """Chemin de l'icône (dev ou .app)."""
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        base = sys._MEIPASS
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
+    base = _app_resource_dir()
     for name in (
         "Mnemos_icon.png",
         "Majeur_icon.png",
@@ -760,7 +769,7 @@ class QuizApp(tk.Tk):
     def show_main_menu(self):
         self.clear()
         self.unbind("<Return>")
-        for key in ("r", "f"):
+        for key in ("r", "f", "p"):
             self.unbind(key)
 
         # Header avec logo + titre
@@ -855,6 +864,7 @@ class QuizApp(tk.Tk):
         # Raccourcis clavier 1–5
         for key, _, cmd in modes:
             self.bind(key, lambda e, c=cmd: c())
+        self.bind("p", lambda e: self._open_weekly_plan_pdf())
 
         # ---- Boutons secondaires ----
         bottom_frame = tk.Frame(self.container, bg=BG_DARK)
@@ -868,6 +878,12 @@ class QuizApp(tk.Tk):
         ).pack(side="left", padx=5)
         self.make_button(
             bottom_frame, "⚙️  Préférences", self.show_preferences, width=18,
+        ).pack(side="left", padx=5)
+        self.make_button(
+            bottom_frame,
+            "📅  Plan hebdomadaire (PDF)",
+            self._open_weekly_plan_pdf,
+            width=26,
         ).pack(side="left", padx=5)
 
         io_row = tk.Frame(self.container, bg=BG_DARK)
@@ -884,7 +900,7 @@ class QuizApp(tk.Tk):
         footer_row.pack(side="bottom", pady=(0, 10))
         tk.Label(
             footer_row,
-            text="Raccourcis : 1-5 = modes · Échap = menu · Entrée = valider",
+            text="Raccourcis : 1-5 = modes · P = plan hebdo · Échap = menu · Entrée = valider",
             font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
         ).pack(side="left")
         # Lien mise à jour
@@ -998,6 +1014,29 @@ class QuizApp(tk.Tk):
             if seg_w > 0:
                 self._draw_rounded_rect(canvas, x, 0, x + seg_w, h, color, r)
             x += seg_w
+
+    def _open_weekly_plan_pdf(self):
+        """Ouvre le PDF du plan de révision dans l’application par défaut (Aperçu, etc.)."""
+        path = os.path.abspath(_weekly_plan_pdf_path())
+        if not os.path.isfile(path):
+            messagebox.showerror(
+                APP_NAME,
+                "Le fichier du plan hebdomadaire est introuvable.\n"
+                "Réinstalle l’application ou contacte le support.",
+            )
+            return
+        try:
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", path], start_new_session=True)
+            elif sys.platform == "win32":
+                os.startfile(path)  # noqa: S606
+            else:
+                subprocess.Popen(["xdg-open", path], start_new_session=True)
+        except OSError as exc:
+            messagebox.showerror(
+                APP_NAME,
+                f"Impossible d’ouvrir le PDF :\n{exc}",
+            )
 
     def _show_about(self):
         """Affiche version et chemin de l'app."""
@@ -1390,7 +1429,7 @@ class QuizApp(tk.Tk):
 
     def _unbind_menu_keys(self):
         """Détache les raccourcis du menu principal."""
-        for key in ("1", "2", "3", "4", "5"):
+        for key in ("1", "2", "3", "4", "5", "p"):
             self.unbind(key)
 
     # --------------------------------------------------------
