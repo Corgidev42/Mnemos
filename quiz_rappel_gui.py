@@ -60,7 +60,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.5.3"
+VERSION = "1.5.4"
 # Nom produit (mnémoniques / système majeur)
 APP_NAME = "Mnémos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -1407,10 +1407,53 @@ class QuizApp(tk.Tk):
         self._build_questions(pairs)
 
     def start_full_mode(self):
-        self._show_sens_then_start(self._do_start_full)
+        self.clear()
+        self._unbind_menu_keys()
+
+        tk.Label(
+            self.container, text="📋  Toute la table", font=FONT_TITLE,
+            bg=BG_DARK, fg=FG_ACCENT,
+        ).pack(pady=(45, 10))
+        tk.Label(
+            self.container,
+            text="Révision de toutes les paires. Choisis la direction et l’ordre des questions.",
+            font=FONT_BODY, bg=BG_DARK, fg=FG_SECONDARY, wraplength=560,
+        ).pack(pady=(0, 14))
+
+        card = self.make_card(self.container)
+        card.pack(padx=80, fill="x")
+
+        self._add_direction_picker(card)
+
+        self.full_shuffle_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            card,
+            text="  Mélanger les questions (ordre aléatoire)",
+            variable=self.full_shuffle_var,
+            font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_PRIMARY,
+            selectcolor=CHECK_BG, activebackground=BG_CARD,
+            activeforeground=CHECK_ON, highlightthickness=0, anchor="w",
+        ).pack(anchor="w", pady=(14, 2))
+        tk.Label(
+            card,
+            text="       Décoché : ordre croissant des nombres (0 → 100), sans mélange.",
+            font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY, wraplength=520,
+            justify="left",
+        ).pack(anchor="w")
+
+        btn_frame = tk.Frame(self.container, bg=BG_DARK)
+        btn_frame.pack(pady=28)
+        self.make_button(
+            btn_frame, "🚀  Lancer", self._do_start_full,
+            accent=True,
+        ).pack(side="left", padx=10)
+        self.make_button(
+            btn_frame, "⬅  Retour", self.show_main_menu,
+        ).pack(side="left", padx=10)
 
     def _do_start_full(self):
-        self._build_questions(list(self.table))
+        shuffle_q = self.full_shuffle_var.get()
+        self._build_questions(list(self.table), shuffle_questions=shuffle_q)
 
     def _show_sens_then_start(self, callback):
         """Demande la direction puis lance le quiz."""
@@ -1458,15 +1501,18 @@ class QuizApp(tk.Tk):
     # --------------------------------------------------------
     # Construction des questions et lancement
     # --------------------------------------------------------
-    def _build_questions(self, pairs):
+    def _build_questions(self, pairs, shuffle_questions=True):
         sens = self.sens_var.get()
+        if not shuffle_questions:
+            pairs = sorted(pairs, key=lambda p: int(p[0]))
         self.questions = []
         for nombre, mot in pairs:
             if sens in ("1", "3"):
                 self.questions.append(("nombre->mot", nombre, mot))
             if sens in ("2", "3"):
                 self.questions.append(("mot->nombre", nombre, mot))
-        random.shuffle(self.questions)
+        if shuffle_questions:
+            random.shuffle(self.questions)
         self.current_q = 0
         self.score = 0
         self.streak = 0
