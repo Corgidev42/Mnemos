@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Mnémos .app et .dmg
+# Build Mnemos .app et .dmg
 # Usage: ./scripts/build_dmg.sh
 #
 # Prérequis :
@@ -21,10 +21,10 @@ sign_macos_app() {
   xattr -cr "$app" 2>/dev/null || true
 }
 
-APP_NAME="Mnémos"
+APP_NAME="Mnemos"
 DIST="dist"
 DMG_DIR="$DIST/dmg"
-DMG_FILE="$DIST/Mnémos-$(grep -E '^VERSION = ' quiz_rappel_gui.py | cut -d'"' -f2).dmg"
+DMG_FILE="$DIST/Mnemos-$(grep -E '^VERSION = ' quiz_rappel_gui.py | cut -d'"' -f2).dmg"
 
 echo "🔨 Build de $APP_NAME…"
 echo ""
@@ -52,11 +52,11 @@ else
   command -v pyinstaller >/dev/null 2>&1 && pyinstaller --noconfirm --clean Mnemos.spec || python3 -m PyInstaller --noconfirm --clean Mnemos.spec
 fi
 
-# PyInstaller onedir crée dist/Mnémos/ ; sur macOS c'est affiché comme .app
+# PyInstaller onedir crée dist/Mnemos/ ; sur macOS c'est affiché comme .app
 if [ -d "$DIST/$APP_NAME.app" ]; then
     APP_PATH="$DIST/$APP_NAME.app"
 elif [ -d "$DIST/$APP_NAME" ]; then
-    if [ -f "$DIST/$APP_NAME/$APP_NAME" ] || [ -f "$DIST/$APP_NAME/Mnémos" ]; then
+    if [ -f "$DIST/$APP_NAME/$APP_NAME" ] || [ -f "$DIST/$APP_NAME/Mnemos" ]; then
         mv "$DIST/$APP_NAME" "$DIST/$APP_NAME.app"
         APP_PATH="$DIST/$APP_NAME.app"
     else
@@ -97,10 +97,10 @@ fi
 
 # 3. Créer le .zip pour la mise à jour auto
 VERSION=$(grep -E '^VERSION = ' quiz_rappel_gui.py | cut -d'"' -f2)
-ZIP_FILE="$DIST/Mnémos-${VERSION}.zip"
+ZIP_FILE="$DIST/Mnemos-${VERSION}.zip"
 echo "📦 Création du .zip (mise à jour auto)…"
 rm -f "$ZIP_FILE"
-(cd "$DIST" && zip -r "Mnémos-${VERSION}.zip" "Mnémos.app")
+(cd "$DIST" && zip -r "Mnemos-${VERSION}.zip" "Mnemos.app")
 
 echo ""
 echo "✅ Terminé !"

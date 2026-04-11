@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec pour Mnémos — génère un .app macOS
+# PyInstaller spec pour Mnemos — génère un .app macOS
 
 import re
 
@@ -36,7 +36,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Mnémos',
+    name='Mnemos',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -57,17 +57,19 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='Mnémos',
+    name='Mnemos',
 )
 
 # Bundle macOS avec version dans Info.plist (CFBundleShortVersionString)
 app = BUNDLE(
     coll,
-    name='Mnémos.app',
+    name='Mnemos.app',
     icon='Mnemos.icns',
     bundle_identifier='com.mnemos.app',
     version=APP_VERSION,
     info_plist={
+        'CFBundleName': 'Mnemos',
+        'CFBundleDisplayName': 'Mnemos',
         'CFBundleShortVersionString': APP_VERSION,
         'CFBundleVersion': APP_VERSION,
         'NSPrincipalClass': 'NSApplication',

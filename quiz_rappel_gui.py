@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Mnémos — Quiz GUI (système majeur / mémoire des nombres)
+Mnemos — Quiz GUI (système majeur / mémoire des nombres)
 Interface pour apprendre et réviser les associations nombre ↔ image.
 Améliorations v2 :
   - Mode Flashcard (blocs, sens, auto-évaluation)
@@ -41,6 +41,7 @@ if sys.platform == "darwin":
 
 import csv
 import json
+import re
 import random
 import shutil
 import stat
@@ -60,17 +61,16 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.5.4"
-# Nom produit (mnémoniques / système majeur)
-APP_NAME = "Mnémos"
+VERSION = "1.5.5"
+# Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
+APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
-RELEASE_ASSET_PREFIX = "Mnémos"
+RELEASE_ASSET_PREFIX = "Mnemos"
 GITHUB_REPO = "Corgidev42/Mnemos"
-# Fichiers sur GitHub Releases : le build ou `gh` peut produire « Mnemos » (ASCII)
-# ou « Mnémos » (accent) — les deux doivent être reconnus pour la maj auto (.zip).
+# Noms d’assets sur les releases (historique + zip macOS actuel « Mnemos-X.Y.Z.zip »).
 ASSET_NAME_MARKERS = (
-    "Mnémos",
     "Mnemos",
+    "Mnémos",
     "TableDeRappel",
     "Majeur",
 )
@@ -88,7 +88,7 @@ def _is_macos_bundle_update_zip(name):
     True si ce .zip est celui du bundle .app macOS pour la maj auto.
 
     Les releases incluent aussi Mnemos-Windows-x64.zip et Mnemos-Linux-x64.zip
-    (CI) : ils matchent « Mnemos » mais ne contiennent pas Mnémos.app — il ne
+    (CI) : ils matchent « Mnemos » mais ne contiennent pas Mnemos.app — il ne
     faut pas les prendre pour _install_update_self.
     """
     if not _release_asset_matches(name, ".zip"):
@@ -97,6 +97,30 @@ def _is_macos_bundle_update_zip(name):
     if "windows" in lower or "linux" in lower:
         return False
     return True
+
+
+def _pick_macos_bundle_zip_url(assets):
+    """
+    Choisit l’URL du zip macOS le plus probable si plusieurs assets matchent.
+    Favorise un nom du type Mnemos-1.2.3.zip (build macOS) plutôt qu’un zip ambigu.
+    """
+    best = None  # (score, name, url)
+    for asset in assets or []:
+        name = asset.get("name", "") or ""
+        url = asset.get("browser_download_url")
+        if not url or not _is_macos_bundle_update_zip(name):
+            continue
+        score = 0
+        if re.search(r"-\d+\.\d+\.\d+\.zip$", name):
+            score += 100
+        if name.startswith("Mnemos-"):
+            score += 20
+        elif name.startswith("Mnémos-"):
+            score += 10
+        cand = (score, name, url)
+        if best is None or cand[:2] > best[:2]:
+            best = cand
+    return best[2] if best else None
 
 
 # ============================================================
@@ -234,14 +258,24 @@ def _get_app_support_dir():
         root = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
         path = os.path.join(root, APP_NAME)
         if not os.path.isdir(path):
-            for old_name in ("Majeur", "TableDeRappel"):
-                old = os.path.join(root, old_name)
-                if os.path.isdir(old):
+            accent = os.path.join(root, "Mnémos")
+            if os.path.isdir(accent):
+                try:
+                    os.rename(accent, path)
+                except OSError:
                     try:
-                        shutil.copytree(old, path)
+                        shutil.copytree(accent, path)
                     except OSError:
                         pass
-                    break
+            if not os.path.isdir(path):
+                for old_name in ("Majeur", "TableDeRappel"):
+                    old = os.path.join(root, old_name)
+                    if os.path.isdir(old):
+                        try:
+                            shutil.copytree(old, path)
+                        except OSError:
+                            pass
+                        break
     else:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".app_data")
     os.makedirs(path, exist_ok=True)
@@ -398,13 +432,12 @@ def check_for_update(callback):
             current = _parse_version(VERSION)
             latest = _parse_version(tag)
             if latest > current:
-                zip_url = dmg_url = None
+                zip_url = _pick_macos_bundle_zip_url(data.get("assets", []))
+                dmg_url = None
                 for asset in data.get("assets", []):
                     name = asset.get("name", "")
                     url = asset.get("browser_download_url")
-                    if _is_macos_bundle_update_zip(name):
-                        zip_url = url
-                    elif _release_asset_matches(name, ".dmg"):
+                    if _release_asset_matches(name, ".dmg"):
                         dmg_url = url
                 callback(True, {
                     "tag": tag, "zip_url": zip_url, "dmg_url": dmg_url,
@@ -474,10 +507,11 @@ def _install_update_self(zip_url, tag, callback):
             with zipfile.ZipFile(zip_path, "r") as zf:
                 zf.extractall(cache_dir)
 
-            # Le .zip contient l'app à la racine (nouveau nom ou ancien bundle)
+            # .app à la racine du zip (Mnemos actuel, Mnémos ancien, ou un seul *.app)
             extracted_app = None
             for folder in (
                 APP_BUNDLE_APP,
+                "Mnémos.app",
                 "Table de Rappel.app",
                 "Majeur.app",
             ):
@@ -485,6 +519,17 @@ def _install_update_self(zip_url, tag, callback):
                 if os.path.isdir(p):
                     extracted_app = p
                     break
+            if not extracted_app:
+                try:
+                    root_apps = [
+                        f for f in os.listdir(cache_dir)
+                        if f.endswith(".app")
+                        and os.path.isdir(os.path.join(cache_dir, f))
+                    ]
+                except OSError:
+                    root_apps = []
+                if len(root_apps) == 1:
+                    extracted_app = os.path.join(cache_dir, root_apps[0])
             if not extracted_app:
                 callback(
                     False,

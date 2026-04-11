@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────
-# Mnémos — Makefile
+# Mnemos — Makefile
 # ──────────────────────────────────────────────
 
 PYTHON  ?= python3
@@ -7,8 +7,8 @@ GUI     := quiz_rappel_gui.py
 STATS   := .app_data/stats.json
 
 VERSION := $(shell grep -E '^VERSION = ' $(GUI) | cut -d'"' -f2)
-DMG     := dist/Mnémos-$(VERSION).dmg
-ZIP     := dist/Mnémos-$(VERSION).zip
+DMG     := dist/Mnemos-$(VERSION).dmg
+ZIP     := dist/Mnemos-$(VERSION).zip
 
 .PHONY: run check clean clean-build reset dmg tag release publish help
 
@@ -37,7 +37,7 @@ clean-build:
 	@rm -rf dist/Majeur dist/Majeur.app 2>/dev/null || true
 	@rm -f dist/Majeur-*.dmg dist/Majeur-*.zip 2>/dev/null || true
 	@rm -f dist/TableDeRappel-*.dmg dist/TableDeRappel-*.zip 2>/dev/null || true
-	@echo "✅ Fait (les builds Mnémos actuels dans dist/ sont conservés ; supprime-les à la main si besoin)"
+	@echo "✅ Fait (les builds Mnemos actuels dans dist/ sont conservés ; supprime-les à la main si besoin)"
 
 ## dmg : Crée l'app .app, le .dmg et le .zip (macOS)
 dmg:
@@ -60,7 +60,7 @@ release: dmg
 		gh release upload v$(VERSION) $(DMG) $(ZIP) --clobber; \
 	else \
 		gh release create v$(VERSION) $(DMG) $(ZIP) --title "v$(VERSION)" \
-			--notes "Mnémos v$(VERSION) — Mise à jour automatique disponible."; \
+			--notes "Mnemos v$(VERSION) — Mise à jour automatique disponible."; \
 	fi
 	@echo "✅ Release v$(VERSION) : https://github.com/Corgidev42/Mnemos/releases/tag/v$(VERSION)"
 
@@ -75,7 +75,7 @@ reset:
 ## help : Affiche cette aide
 help:
 	@echo ""
-	@echo "  Mnémos — Commandes disponibles"
+	@echo "  Mnemos — Commandes disponibles"
 	@echo "  ────────────────────────────────────────"
 	@grep -E '^## ' Makefile | sed 's/## /  /' | sort
 	@echo ""
