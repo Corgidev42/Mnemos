@@ -60,7 +60,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.5.2"
+VERSION = "1.5.3"
 # Nom produit (mnémoniques / système majeur)
 APP_NAME = "Mnémos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -81,6 +81,23 @@ def _release_asset_matches(name, ext):
     if not name.endswith(ext):
         return False
     return any(marker in name for marker in ASSET_NAME_MARKERS)
+
+
+def _is_macos_bundle_update_zip(name):
+    """
+    True si ce .zip est celui du bundle .app macOS pour la maj auto.
+
+    Les releases incluent aussi Mnemos-Windows-x64.zip et Mnemos-Linux-x64.zip
+    (CI) : ils matchent « Mnemos » mais ne contiennent pas Mnémos.app — il ne
+    faut pas les prendre pour _install_update_self.
+    """
+    if not _release_asset_matches(name, ".zip"):
+        return False
+    lower = name.lower()
+    if "windows" in lower or "linux" in lower:
+        return False
+    return True
+
 
 # ============================================================
 # Constantes de style — thème "Memory Palace" (violet & turquoise)
@@ -385,7 +402,7 @@ def check_for_update(callback):
                 for asset in data.get("assets", []):
                     name = asset.get("name", "")
                     url = asset.get("browser_download_url")
-                    if _release_asset_matches(name, ".zip"):
+                    if _is_macos_bundle_update_zip(name):
                         zip_url = url
                     elif _release_asset_matches(name, ".dmg"):
                         dmg_url = url
@@ -446,6 +463,12 @@ def _install_update_self(zip_url, tag, callback):
                     f.write(resp.read())
                     f.flush()
                     os.fsync(f.fileno())
+
+            # Repartir d’un cache vide (évite un mélange avec un .zip CI ou une vieille extraction)
+            for fname in os.listdir(cache_dir):
+                fp = os.path.join(cache_dir, fname)
+                if os.path.isdir(fp):
+                    shutil.rmtree(fp, ignore_errors=True)
 
             # Extraire
             with zipfile.ZipFile(zip_path, "r") as zf:
