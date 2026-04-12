@@ -18,7 +18,7 @@ a = Analysis(
         ('Mnemos_icon.png', '.'),
         ('Plan_hebdomadaire_Mnemos.pdf', '.'),
     ],
-    hiddenimports=['PIL', 'PIL._tkinter_finder'],
+    hiddenimports=['PIL', 'PIL._tkinter_finder', 'certifi'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

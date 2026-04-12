@@ -1,2 +1,3 @@
-# Pour le build (icône .icns et logo dans l'app)
+# Pour le build (icône .icns et logo dans l'app) + CA HTTPS fiable en .app
 pillow>=10.0.0
+certifi>=2024.0.0

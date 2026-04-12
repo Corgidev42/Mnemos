@@ -42,9 +42,11 @@ if sys.platform == "darwin":
 import csv
 import datetime
 import json
+import queue
 import re
 import random
 import shutil
+import ssl
 import stat
 import subprocess
 import tempfile
@@ -62,7 +64,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 # Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -100,11 +102,21 @@ def _is_macos_bundle_update_zip(name):
     return True
 
 
-def _pick_macos_bundle_zip_url(assets):
+def _pick_macos_bundle_zip_url(assets, tag_name=""):
     """
     Choisit l’URL du zip macOS le plus probable si plusieurs assets matchent.
-    Favorise un nom du type Mnemos-1.2.3.zip (build macOS) plutôt qu’un zip ambigu.
+    Si tag_name est fourni (ex. v1.2.3), privilégie exactement Mnemos-1.2.3.zip.
     """
+    if tag_name:
+        ver = re.sub(r"^v", "", str(tag_name).strip(), count=1)
+        want = f"{RELEASE_ASSET_PREFIX}-{ver}.zip"
+        for asset in assets or []:
+            name = asset.get("name", "") or ""
+            if name != want:
+                continue
+            url = asset.get("browser_download_url")
+            if url and _is_macos_bundle_update_zip(name):
+                return url
     best = None  # (score, name, url)
     for asset in assets or []:
         name = asset.get("name", "") or ""
@@ -122,6 +134,30 @@ def _pick_macos_bundle_zip_url(assets):
         if best is None or cand[:2] > best[:2]:
             best = cand
     return best[2] if best else None
+
+
+def _ssl_context_for_https():
+    """Contexte SSL explicite (certifi en build PyInstaller si dispo)."""
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
+def _github_urlopen(url, *, timeout, accept="application/octet-stream"):
+    """GET GitHub (releases / API) avec User-Agent et CA fiables."""
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": f"{APP_NAME}-Updater/1.0",
+            "Accept": accept,
+        },
+    )
+    return urllib.request.urlopen(
+        req, timeout=timeout, context=_ssl_context_for_https(),
+    )
 
 
 # ============================================================
@@ -548,36 +584,46 @@ def _can_auto_update():
     return _auto_update_eligibility()[0]
 
 
-def check_for_update(callback):
+def check_for_update(invoke_on_main, callback):
     """
-    Vérifie si une mise à jour est disponible.
+    Vérifie si une mise à jour est disponible (réseau dans un thread).
+
+    invoke_on_main(fn) : exécute fn sur le thread Tk (obligatoire : Tk n’est pas
+    thread-safe, ne pas appeler callback / after() depuis le thread réseau).
+
     callback(ok, result) avec result = dict ou message d'erreur.
     """
     def _do_check():
         try:
-            url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-            req = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            api = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+            with _github_urlopen(
+                api, timeout=15, accept="application/vnd.github+json",
+            ) as resp:
                 data = json.loads(resp.read().decode())
             tag = data.get("tag_name", "v0.0.0")
             current = _parse_version(VERSION)
             latest = _parse_version(tag)
             if latest > current:
-                zip_url = _pick_macos_bundle_zip_url(data.get("assets", []))
+                zip_url = _pick_macos_bundle_zip_url(
+                    data.get("assets", []), tag_name=tag,
+                )
                 dmg_url = None
                 for asset in data.get("assets", []):
                     name = asset.get("name", "")
-                    url = asset.get("browser_download_url")
+                    aurl = asset.get("browser_download_url")
                     if _release_asset_matches(name, ".dmg"):
-                        dmg_url = url
-                callback(True, {
-                    "tag": tag, "zip_url": zip_url, "dmg_url": dmg_url,
-                    "body": data.get("body", ""),
-                })
+                        dmg_url = aurl
+                invoke_on_main(
+                    lambda: callback(True, {
+                        "tag": tag, "zip_url": zip_url, "dmg_url": dmg_url,
+                        "body": data.get("body", ""),
+                    }),
+                )
             else:
-                callback(True, {"up_to_date": True})
+                invoke_on_main(lambda: callback(True, {"up_to_date": True}))
         except Exception as e:
-            callback(False, str(e))
+            _err = str(e)
+            invoke_on_main(lambda msg=_err: callback(False, msg))
 
     threading.Thread(target=_do_check, daemon=True).start()
 
@@ -600,16 +646,21 @@ def _ensure_macos_executables(app_bundle_path):
                 pass
 
 
-def _install_update_self(zip_url, tag, callback):
+def _install_update_self(invoke_on_main, zip_url, tag, callback):
     """
     Mise à jour automatique : télécharge le .zip, extrait, remplace l'app, relance.
     Uniquement en mode .app sur macOS.
+    invoke_on_main(fn) : rappels UI sur le thread Tk uniquement.
     """
     def _do_install():
         try:
             app_path = _get_app_bundle_path()
             if not app_path or not os.path.isdir(app_path):
-                callback(False, "Mise à jour auto indisponible (pas en mode .app)")
+                invoke_on_main(
+                    lambda: callback(
+                        False, "Mise à jour auto indisponible (pas en mode .app)",
+                    ),
+                )
                 return
 
             cache_dir = os.path.join(
@@ -618,15 +669,25 @@ def _install_update_self(zip_url, tag, callback):
             )
             os.makedirs(cache_dir, exist_ok=True)
 
-            # Télécharger le .zip (User-Agent requis par GitHub)
-            zip_path = os.path.join(cache_dir, f"{RELEASE_ASSET_PREFIX}-{tag}.zip")
-            req = urllib.request.Request(
-                zip_url, headers={"User-Agent": f"{APP_NAME}-Updater/1.0"})
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            ver = re.sub(r"^v", "", str(tag).strip(), count=1)
+            zip_path = os.path.join(cache_dir, f"{RELEASE_ASSET_PREFIX}-{ver}.zip")
+
+            with _github_urlopen(zip_url, timeout=180) as resp:
                 with open(zip_path, "wb") as f:
-                    f.write(resp.read())
+                    shutil.copyfileobj(resp, f, length=256 * 1024)
                     f.flush()
                     os.fsync(f.fileno())
+
+            if not zipfile.is_zipfile(zip_path):
+                invoke_on_main(
+                    lambda: callback(
+                        False,
+                        "Le téléchargement n’est pas un fichier .zip valide "
+                        "(réseau, pare-feu ou fichier release). Réessaie ou "
+                        "télécharge le .dmg à la main.",
+                    ),
+                )
+                return
 
             # Repartir d’un cache vide (évite un mélange avec un .zip CI ou une vieille extraction)
             for fname in os.listdir(cache_dir):
@@ -662,9 +723,11 @@ def _install_update_self(zip_url, tag, callback):
                 if len(root_apps) == 1:
                     extracted_app = os.path.join(cache_dir, root_apps[0])
             if not extracted_app:
-                callback(
-                    False,
-                    f"Format du .zip invalide ({APP_BUNDLE_APP} manquant)",
+                invoke_on_main(
+                    lambda: callback(
+                        False,
+                        f"Format du .zip invalide ({APP_BUNDLE_APP} manquant)",
+                    ),
                 )
                 return
 
@@ -702,28 +765,36 @@ rm -rf "$CACHE_DIR"
             # Lancer le script en arrière-plan
             subprocess.Popen(["bash", script_path], start_new_session=True)
 
-            callback(True, "restart")  # signal spécial : on va quitter
+            invoke_on_main(lambda: callback(True, "restart"))
         except Exception as e:
-            callback(False, str(e))
+            _err = str(e)
+            invoke_on_main(lambda msg=_err: callback(False, msg))
 
     threading.Thread(target=_do_install, daemon=True).start()
 
 
-def download_and_open_dmg(url, callback):
+def download_and_open_dmg(url, invoke_on_main, callback):
     """Télécharge le .dmg et l'ouvre (fallback manuel). callback(success, message)."""
 
     def _do_download():
         try:
             dest = os.path.join(
                 tempfile.gettempdir(), f"{APP_NAME}_update.dmg")
-            urllib.request.urlretrieve(url, dest)
+            with _github_urlopen(url, timeout=300) as resp:
+                with open(dest, "wb") as f:
+                    shutil.copyfileobj(resp, f, length=256 * 1024)
+                    f.flush()
+                    os.fsync(f.fileno())
             os.system(f'open "{dest}"')
-            callback(
-                True,
-                f"Le .dmg a été ouvert. Glisse « {APP_NAME} » dans Applications.",
+            invoke_on_main(
+                lambda: callback(
+                    True,
+                    f"Le .dmg a été ouvert. Glisse « {APP_NAME} » dans Applications.",
+                ),
             )
         except Exception as e:
-            callback(False, str(e))
+            _err = str(e)
+            invoke_on_main(lambda msg=_err: callback(False, msg))
 
     threading.Thread(target=_do_download, daemon=True).start()
 
@@ -876,6 +947,10 @@ class QuizApp(tk.Tk):
         self.stats = load_stats(self.table)
         self.preferences = load_preferences()
         self.manual_weak = load_manual_weak_set(self.table)
+
+        # Callbacks réseau / threads → exécution sur le thread Tk uniquement
+        self._main_thread_queue = queue.Queue()
+        self.after(80, self._pump_main_thread_queue)
 
         # Variables de quiz
         self.questions = []
@@ -1441,79 +1516,92 @@ class QuizApp(tk.Tk):
             "(Clic pour vérifier les mises à jour)",
         )
 
+    def _invoke_main(self, fn):
+        """Exécute fn sur le thread Tk (obligatoire après du code réseau / worker)."""
+        self._main_thread_queue.put(fn)
+
+    def _pump_main_thread_queue(self):
+        try:
+            while True:
+                fn = self._main_thread_queue.get_nowait()
+                try:
+                    fn()
+                except Exception:
+                    pass
+        except queue.Empty:
+            pass
+        self.after(80, self._pump_main_thread_queue)
+
     def _check_update(self):
         """Vérifie les mises à jour et affiche une boîte de dialogue."""
-        check_for_update(self._on_update_result)
+        check_for_update(self._invoke_main, self._on_update_result)
 
     def _on_update_result(self, ok, result):
-        """Callback après vérification des mises à jour (thread)."""
-        def _show():
-            if not ok:
-                messagebox.showerror("Erreur", f"Impossible de vérifier : {result}")
-                return
-            if result.get("up_to_date"):
-                messagebox.showinfo("À jour", f"Tu as déjà la dernière version (v{VERSION}).")
-                return
-            tag = result.get("tag", "")
-            zip_url = result.get("zip_url")
-            dmg_url = result.get("dmg_url")
+        """Appelé sur le thread Tk après la requête GitHub."""
+        if not ok:
+            messagebox.showerror("Erreur", f"Impossible de vérifier : {result}")
+            return
+        if result.get("up_to_date"):
+            messagebox.showinfo("À jour", f"Tu as déjà la dernière version (v{VERSION}).")
+            return
+        tag = result.get("tag", "")
+        zip_url = result.get("zip_url")
+        dmg_url = result.get("dmg_url")
 
-            # Auto-update si .zip dispo et app PyInstaller (pas python3, pas DMG monté)
-            can_auto, auto_reason = _auto_update_eligibility()
-            use_auto = bool(zip_url) and can_auto
-            if use_auto:
-                msg = (
-                    f"Une nouvelle version ({tag}) est disponible. "
-                    f"Mise à jour automatique ?"
-                )
-            elif not zip_url:
-                msg = (
-                    f"Une nouvelle version ({tag}) est disponible. "
-                    f"Aucun fichier .zip sur la release (maj auto impossible). "
-                    f"Télécharger le .dmg pour installer à la main ?"
-                )
-            elif auto_reason == "from_dmg":
-                msg = (
-                    f"Une nouvelle version ({tag}) est disponible. "
-                    f"Tu lances l’app depuis le disque image : copie « {APP_NAME} » "
-                    f"dans Applications, puis rouvre-la depuis le dossier Applications "
-                    f"pour activer la mise à jour automatique. "
-                    f"Télécharger le .dmg maintenant ?"
-                )
-            else:
-                msg = (
-                    f"Une nouvelle version ({tag}) est disponible. "
-                    f"La mise à jour automatique ne fonctionne qu’avec l’application "
-                    f"« {APP_NAME}.app » installée (pas en lançant le script Python). "
-                    f"Télécharger le .dmg ?"
-                )
-            if not messagebox.askyesno("Mise à jour disponible", msg):
-                return
+        can_auto, auto_reason = _auto_update_eligibility()
+        use_auto = bool(zip_url) and can_auto
+        if use_auto:
+            msg = (
+                f"Une nouvelle version ({tag}) est disponible. "
+                f"Mise à jour automatique ?"
+            )
+        elif not zip_url:
+            msg = (
+                f"Une nouvelle version ({tag}) est disponible. "
+                f"Aucun fichier .zip sur la release (maj auto impossible). "
+                f"Télécharger le .dmg pour installer à la main ?"
+            )
+        elif auto_reason == "from_dmg":
+            msg = (
+                f"Une nouvelle version ({tag}) est disponible. "
+                f"Tu lances l’app depuis le disque image : copie « {APP_NAME} » "
+                f"dans Applications, puis rouvre-la depuis le dossier Applications "
+                f"pour activer la mise à jour automatique. "
+                f"Télécharger le .dmg maintenant ?"
+            )
+        else:
+            msg = (
+                f"Une nouvelle version ({tag}) est disponible. "
+                f"La mise à jour automatique ne fonctionne qu’avec l’application "
+                f"« {APP_NAME}.app » installée (pas en lançant le script Python). "
+                f"Télécharger le .dmg ?"
+            )
+        if not messagebox.askyesno("Mise à jour disponible", msg):
+            return
 
-            if use_auto:
-                _install_update_self(zip_url, tag.lstrip("v"), self._on_download_result)
-            elif dmg_url:
-                download_and_open_dmg(dmg_url, self._on_download_result)
-            else:
-                messagebox.showinfo(
-                    "Mise à jour disponible",
-                    f"Version {tag} disponible sur GitHub.",
-                )
-
-        self.after(0, _show)
+        if use_auto:
+            _install_update_self(
+                self._invoke_main, zip_url, tag, self._on_download_result,
+            )
+        elif dmg_url:
+            download_and_open_dmg(
+                dmg_url, self._invoke_main, self._on_download_result,
+            )
+        else:
+            messagebox.showinfo(
+                "Mise à jour disponible",
+                f"Version {tag} disponible sur GitHub.",
+            )
 
     def _on_download_result(self, success, message):
-        """Callback après téléchargement ou mise à jour auto (thread)."""
-        def _show():
-            if success:
-                if message == "restart":
-                    self._on_quit()  # Ferme l'app pour que l'updater la remplace
-                else:
-                    messagebox.showinfo("Téléchargement terminé", message)
+        """Appelé sur le thread Tk après téléchargement / install."""
+        if success:
+            if message == "restart":
+                self._on_quit()
             else:
-                messagebox.showerror("Erreur", f"Échec : {message}")
-
-        self.after(0, _show)
+                messagebox.showinfo("Téléchargement terminé", message)
+        else:
+            messagebox.showerror("Erreur", f"Échec : {message}")
 
     # --------------------------------------------------------
     # Écran : Configuration bloc

@@ -11,11 +11,17 @@ ICNS_OUT="${SCRIPT_DIR}/Mnemos.icns"
 
 [[ -f "$ICON_SRC" ]] || { echo "❌ Mnemos_icon.png introuvable"; exit 1; }
 
+if [[ -x "${SCRIPT_DIR}/venv/bin/python3" ]]; then
+  PY="${SCRIPT_DIR}/venv/bin/python3"
+else
+  PY="python3"
+fi
+
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"
 
 # Générer les PNG avec Pillow (alpha requis par iconutil)
-python3 - "$ICON_SRC" "$ICONSET" << 'PY'
+"$PY" - "$ICON_SRC" "$ICONSET" << 'PY'
 from PIL import Image
 import os, sys
 src, iconset = sys.argv[1], sys.argv[2]
