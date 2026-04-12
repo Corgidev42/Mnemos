@@ -109,6 +109,17 @@ VERSION=$(grep -E '^VERSION = ' quiz_rappel_gui.py | cut -d'"' -f2)
 ZIP_FILE="$DIST/Mnemos-${VERSION}.zip"
 echo "📦 Création du .zip (mise à jour auto)…"
 rm -f "$ZIP_FILE"
+# PyInstaller / outils peuvent ne laisser que la copie dans dmg/ : rétablir dist/Mnemos.app
+if [[ ! -d "$DIST/$APP_NAME.app" ]]; then
+  if [[ -d "$DMG_DIR/$APP_NAME.app" ]]; then
+    echo "⚠️  $DIST/$APP_NAME.app absent : recopie depuis $DMG_DIR/ pour le zip…"
+    cp -R "$DMG_DIR/$APP_NAME.app" "$DIST/"
+    APP_PATH="$DIST/$APP_NAME.app"
+  else
+    echo "❌ $DIST/$APP_NAME.app introuvable (zip maj auto impossible)."
+    exit 1
+  fi
+fi
 # -X : moins de métadonnées macOS dans l’archive ; xattr sur l’app juste avant
 sign_macos_app "$APP_PATH"
 (cd "$DIST" && zip -r -X "Mnemos-${VERSION}.zip" "Mnemos.app")
