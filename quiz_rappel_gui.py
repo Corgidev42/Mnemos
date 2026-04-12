@@ -64,7 +64,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.6.4"
+VERSION = "1.6.5"
 # Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -1069,7 +1069,7 @@ class QuizApp(tk.Tk):
             bg, fg, hover_bg = BTN_BG, FG_PRIMARY, BTN_HOVER
 
         kw = dict(
-            parent=parent, text=text,
+            text=text,
             font=FONT_BODY_BOLD, bg=bg, fg=fg,
             cursor="hand2", pady=8, padx=6,
             relief="flat", anchor="center",
@@ -1077,7 +1077,7 @@ class QuizApp(tk.Tk):
         )
         if not fill_x:
             kw["width"] = width
-        btn = tk.Label(**kw)
+        btn = tk.Label(parent, **kw)
         btn.bind("<Button-1>", lambda e: command())
         btn.bind("<Enter>", lambda e: btn.configure(bg=hover_bg, highlightbackground=FG_ACCENT))
         btn.bind("<Leave>", lambda e: btn.configure(bg=bg, highlightbackground=BORDER_ACCENT))
