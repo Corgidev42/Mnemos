@@ -42,7 +42,7 @@ jobs:
         run: python -c "import tkinter; print('tkinter OK')"
 
       - name: Installer PyInstaller
-        run: pip install pyinstaller pillow
+        run: pip install pyinstaller pillow certifi
 
       - name: Build (Mnemos_ci.spec)
         run: pyinstaller --noconfirm Mnemos_ci.spec
