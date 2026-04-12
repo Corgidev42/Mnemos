@@ -60,7 +60,11 @@ pip install -r requirements.txt
 
 Les releases publient les fichiers `Mnemos-*.zip` / `Mnemos-*.dmg` (voir `GITHUB_REPO` dans `quiz_rappel_gui.py`). Les anciennes releases peuvent encore porter le préfixe `Mnémos-` ; l’app les reconnaît encore.
 
-Le script `scripts/build_dmg.sh` (et donc `make dmg` / `make release`) exécute déjà `xattr -cr` sur le fichier `.dmg` produit. Si tu copies un `.dmg` téléchargé ailleurs et que macOS bloque encore, tu peux refaire manuellement : `xattr -cr /chemin/vers/Mnemos-*.dmg`.
+Le script `scripts/build_dmg.sh` exécute `xattr -cr` sur le `.dmg`, le `.zip` et le `.app` (signature ad hoc + nettoyage des attributs étendus). Ce n’est **pas** équivalent à la **notarisation Apple** : sans compte développeur payant et workflow de notarisation, macOS peut encore afficher *« Élément non ouvert »* / *logiciel malveillant* pour une app téléchargée depuis Internet.
+
+**Premier lancement (app non notariée)** : clic droit sur `Mnemos.app` → **Ouvrir** → confirmer **Ouvrir** (une seule fois). Tu peux aussi en Terminal : `xattr -cr /Applications/Mnemos.app`.
+
+La seule façon d’éviter cet avertissement pour tous les utilisateurs est de **notariser** le build avec un certificat **Developer ID** Apple.
 
 ---
 

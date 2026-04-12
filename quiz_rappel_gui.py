@@ -64,7 +64,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.6.2"
+VERSION = "1.6.3"
 # Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -997,7 +997,7 @@ class QuizApp(tk.Tk):
             w.destroy()
 
     def make_button(self, parent, text, command, accent=False, width=25,
-                    danger=False):
+                    danger=False, fill_x=False):
         if danger:
             bg, fg, hover_bg = FG_RED, "#ffffff", "#fda4af"
         elif accent:
@@ -1005,13 +1005,16 @@ class QuizApp(tk.Tk):
         else:
             bg, fg, hover_bg = BTN_BG, FG_PRIMARY, BTN_HOVER
 
-        btn = tk.Label(
-            parent, text=text,
+        kw = dict(
+            parent=parent, text=text,
             font=FONT_BODY_BOLD, bg=bg, fg=fg,
-            cursor="hand2", width=width, pady=10, padx=4,
+            cursor="hand2", pady=8, padx=6,
             relief="flat", anchor="center",
             highlightthickness=1, highlightbackground=BORDER_ACCENT,
         )
+        if not fill_x:
+            kw["width"] = width
+        btn = tk.Label(**kw)
         btn.bind("<Button-1>", lambda e: command())
         btn.bind("<Enter>", lambda e: btn.configure(bg=hover_bg, highlightbackground=FG_ACCENT))
         btn.bind("<Leave>", lambda e: btn.configure(bg=bg, highlightbackground=BORDER_ACCENT))
@@ -1059,35 +1062,17 @@ class QuizApp(tk.Tk):
         for key in ("r", "f", "p"):
             self.unbind(key)
 
-        # Header avec logo + titre
+        # Bandeau : logo seul en haut à gauche (clic = À propos)
         header = tk.Frame(self.container, bg=BG_DARK)
-        header.pack(pady=(28, 0))
+        header.pack(fill="x", padx=20, pady=(10, 2))
 
-        logo_img = _load_logo_photo(72)
+        logo_img = _load_logo_photo(52)
         if logo_img:
-            self._logo_ref = logo_img  # Garde la ref (évite GC)
+            self._logo_ref = logo_img
             logo_lbl = tk.Label(header, image=logo_img, bg=BG_DARK)
-            logo_lbl.pack(side="left", padx=(0, 16))
+            logo_lbl.pack(side="left", anchor="nw")
             logo_lbl.bind("<Button-1>", lambda e: self._show_about())
             logo_lbl.config(cursor="hand2")
-
-        title_frame = tk.Frame(header, bg=BG_DARK)
-        title_frame.pack(side="left")
-        tk.Label(
-            title_frame, text=APP_NAME,
-            font=("Helvetica Neue", 32, "bold") if sys.platform == "darwin" else ("Helvetica", 32, "bold"),
-            bg=BG_DARK, fg=FG_ACCENT,
-        ).pack(anchor="w")
-        about_lbl = tk.Label(
-            title_frame,
-            text=f"Système majeur — associations nombre ↔ image · v{VERSION}",
-            font=FONT_SUBTITLE, bg=BG_DARK, fg=FG_SECONDARY,
-            cursor="hand2",
-        )
-        about_lbl.pack(anchor="w", pady=(2, 0))
-        about_lbl.bind("<Button-1>", lambda e: self._show_about())
-
-        tk.Frame(self.container, bg=BG_DARK, height=22).pack()  # Espace
 
         # Stats résumé
         total = len(self.stats)
@@ -1101,13 +1086,13 @@ class QuizApp(tk.Tk):
             1 for v in self.stats.values() if v[0] == 0 and v[1] == 0
         )
 
-        stats_frame = self.make_card(self.container)
-        stats_frame.pack(pady=(0, 16), padx=36, fill="x")
+        stats_frame = self.make_card(self.container, padx=14, pady=8)
+        stats_frame.pack(pady=(4, 10), padx=20, fill="x")
 
-        # Barre de maîtrise
-        bar_canvas = tk.Canvas(stats_frame, height=12, bg=BTN_BG,
+        # Barre de maîtrise (fine)
+        bar_canvas = tk.Canvas(stats_frame, height=6, bg=BTN_BG,
                                highlightthickness=0)
-        bar_canvas.pack(fill="x", pady=(0, 12))
+        bar_canvas.pack(fill="x", pady=(0, 6))
         self.after(50, lambda: self._draw_mastery_bar(
             bar_canvas, total, bien_connus, en_cours, a_revoir, non_vus))
 
@@ -1121,23 +1106,26 @@ class QuizApp(tk.Tk):
             ("À revoir", a_revoir, FG_RED),
             ("Non vus", non_vus, FG_SECONDARY),
         ]:
-            col = tk.Frame(stats_inner, bg=BG_CARD, padx=18)
+            col = tk.Frame(stats_inner, bg=BG_CARD, padx=10)
             col.pack(side="left")
             tk.Label(col, text=str(value),
-                     font=("Helvetica", 22, "bold"),
+                     font=("Helvetica", 15, "bold"),
                      bg=BG_CARD, fg=color).pack()
             tk.Label(col, text=label, font=FONT_SMALL,
                      bg=BG_CARD, fg=FG_SECONDARY).pack()
 
-        # ---- Deux colonnes : modes | plan hebdomadaire ----
+        # ---- Colonnes : modes (s’étire) | plan hebdo (grille 2 colonnes) ----
         mid = tk.Frame(self.container, bg=BG_DARK)
-        mid.pack(fill="both", expand=True, padx=28, pady=(0, 6))
+        mid.pack(fill="both", expand=True, padx=20, pady=(0, 4))
+        mid.rowconfigure(0, weight=1)
+        mid.columnconfigure(0, weight=3, minsize=280)
+        mid.columnconfigure(1, weight=2, minsize=340)
 
         left_col = tk.Frame(mid, bg=BG_DARK)
-        left_col.pack(side="left", fill="both", expand=True, padx=(0, 14))
+        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 
         modes_frame = tk.Frame(left_col, bg=BG_DARK)
-        modes_frame.pack(fill="x", pady=(0, 4))
+        modes_frame.pack(fill="both", expand=True)
 
         modes = [
             ("1", "📦  Quiz par bloc", self.show_bloc_config),
@@ -1148,18 +1136,21 @@ class QuizApp(tk.Tk):
         ]
         for key, text, cmd in modes:
             row = tk.Frame(modes_frame, bg=BG_DARK)
-            row.pack(fill="x", pady=3)
-            tk.Label(row, text=key, font=FONT_BODY_BOLD, bg=BG_INPUT,
-                     fg=FG_ACCENT, width=3, pady=2).pack(side="left", padx=(0, 8))
-            self.make_button(row, text, cmd, width=30).pack(side="left")
+            row.pack(fill="x", pady=4)
+            tk.Label(
+                row, text=key, font=FONT_BODY_BOLD, bg=BG_INPUT,
+                fg=FG_ACCENT, width=2, pady=4,
+            ).pack(side="left", padx=(0, 6))
+            self.make_button(row, text, cmd, fill_x=True).pack(
+                side="left", fill="both", expand=True,
+            )
 
         for key, _, cmd in modes:
             self.bind(key, lambda e, c=cmd: c())
         self.bind("p", lambda e: self._show_conseil_dialog())
 
-        right_col = tk.Frame(mid, bg=BG_DARK, width=360)
-        right_col.pack(side="right", fill="y", padx=(10, 0))
-        right_col.pack_propagate(False)
+        right_col = tk.Frame(mid, bg=BG_DARK)
+        right_col.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         self._build_home_weekly_plan_panel(right_col)
 
         # ---- Boutons secondaires ----
@@ -1335,40 +1326,58 @@ class QuizApp(tk.Tk):
             )
 
     def _build_home_weekly_plan_panel(self, parent):
-        """Panneau d’accueil : titre, 7 cases, jour courant mis en avant."""
+        """Plan : titre + bouton éditer visibles, L–Me | Je–Di en deux colonnes."""
         for w in parent.winfo_children():
             w.destroy()
 
-        plan_card = self.make_card(parent, padx=14, pady=12)
+        plan_card = self.make_card(parent, padx=10, pady=8)
         plan_card.pack(fill="both", expand=True)
 
+        head = tk.Frame(plan_card, bg=BG_CARD)
+        head.pack(fill="x", pady=(0, 4))
         tk.Label(
-            plan_card, text="Plan de la semaine",
+            head, text="Plan de la semaine",
             font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_ACCENT,
-        ).pack(anchor="w", pady=(0, 2))
+        ).pack(side="left", anchor="w")
+        self.make_button(
+            head, "✏️  Modifier", self._open_weekly_plan_editor,
+            accent=True, width=14,
+        ).pack(side="right", padx=(8, 0))
+
         tk.Label(
             plan_card,
-            text="Aujourd’hui est un peu plus lumineux. Modifie le texte à ta façon.",
+            text="Jour actuel surligné · texte éditable (bouton ci-dessus).",
             font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
-            wraplength=320, justify="left",
-        ).pack(anchor="w", pady=(0, 8))
+            wraplength=400, justify="left",
+        ).pack(anchor="w", pady=(0, 6))
+
+        cols = tk.Frame(plan_card, bg=BG_CARD)
+        cols.pack(fill="both", expand=True)
+        cols.columnconfigure(0, weight=1)
+        cols.columnconfigure(1, weight=1)
+
+        left_wrap = tk.Frame(cols, bg=BG_CARD)
+        left_wrap.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        right_wrap = tk.Frame(cols, bg=BG_CARD)
+        right_wrap.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
 
         today_i = datetime.date.today().weekday()
         days = load_weekly_plan_days()
 
-        for i, label in enumerate(WEEKDAY_LABELS_FR):
+        def day_cell(par, i, wrap_len):
+            label = WEEKDAY_LABELS_FR[i]
             is_today = i == today_i
             wrap_bg = "#2a2040" if is_today else BG_INPUT
             border = FG_GOLD if is_today else BORDER_ACCENT
             thick = 2 if is_today else 1
 
             cell = tk.Frame(
-                plan_card, bg=wrap_bg, padx=2, pady=2,
+                par, bg=wrap_bg, padx=1, pady=1,
                 highlightthickness=thick, highlightbackground=border,
             )
-            cell.pack(fill="x", pady=4)
+            cell.pack(fill="x", pady=3)
 
-            inner = tk.Frame(cell, bg=BG_CARD, padx=8, pady=6)
+            inner = tk.Frame(cell, bg=BG_CARD, padx=6, pady=4)
             inner.pack(fill="x")
 
             title = f"● {label}" if is_today else label
@@ -1382,15 +1391,13 @@ class QuizApp(tk.Tk):
             tk.Label(
                 inner, text=body or "—",
                 font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
-                wraplength=300, justify="left", anchor="w",
-            ).pack(anchor="w", pady=(2, 0))
+                wraplength=wrap_len, justify="left", anchor="w",
+            ).pack(anchor="w", pady=(1, 0))
 
-        btn_row = tk.Frame(plan_card, bg=BG_CARD)
-        btn_row.pack(fill="x", pady=(10, 0))
-        self.make_button(
-            btn_row, "✏️  Modifier le plan…", self._open_weekly_plan_editor,
-            width=22,
-        ).pack(side="left")
+        for i in range(0, 3):
+            day_cell(left_wrap, i, 210)
+        for i in range(3, 7):
+            day_cell(right_wrap, i, 210)
 
     def _open_weekly_plan_editor(self):
         """Fenêtre modale : un champ par jour, sauvegarde dans App Support."""
@@ -1398,9 +1405,13 @@ class QuizApp(tk.Tk):
         editor.title("Modifier le plan hebdomadaire")
         editor.configure(bg=BG_DARK)
         editor.transient(self)
+        if sys.platform == "darwin":
+            editor.attributes("-topmost", True)
+            editor.after(400, lambda ed=editor: ed.attributes("-topmost", False))
         editor.grab_set()
         editor.geometry("640x520")
         editor.minsize(520, 400)
+        editor.focus_force()
 
         tk.Label(
             editor, text="Plan hebdomadaire",
@@ -1506,14 +1517,15 @@ class QuizApp(tk.Tk):
         )
 
     def _show_about(self):
-        """Affiche version et chemin de l'app."""
+        """Affiche version, pitch et chemin de l'app."""
         app_path = _get_app_bundle_path()
         path_info = app_path if app_path else sys.executable
         messagebox.showinfo(
             "À propos",
             f"{APP_NAME} v{VERSION}\n\n"
+            f"Système majeur — mémoriser les associations nombre ↔ image.\n\n"
             f"Chemin : {path_info}\n\n"
-            "(Clic pour vérifier les mises à jour)",
+            f"Menu : lien « Vérifier les mises à jour ».",
         )
 
     def _invoke_main(self, fn):

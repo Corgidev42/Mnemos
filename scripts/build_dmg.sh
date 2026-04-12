@@ -109,7 +109,10 @@ VERSION=$(grep -E '^VERSION = ' quiz_rappel_gui.py | cut -d'"' -f2)
 ZIP_FILE="$DIST/Mnemos-${VERSION}.zip"
 echo "📦 Création du .zip (mise à jour auto)…"
 rm -f "$ZIP_FILE"
-(cd "$DIST" && zip -r "Mnemos-${VERSION}.zip" "Mnemos.app")
+# -X : moins de métadonnées macOS dans l’archive ; xattr sur l’app juste avant
+sign_macos_app "$APP_PATH"
+(cd "$DIST" && zip -r -X "Mnemos-${VERSION}.zip" "Mnemos.app")
+xattr -cr "$ZIP_FILE" 2>/dev/null || true
 
 echo ""
 echo "✅ Terminé !"
