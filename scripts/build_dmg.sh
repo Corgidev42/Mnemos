@@ -84,15 +84,24 @@ if command -v create-dmg &> /dev/null; then
     create-dmg \
         --volname "$APP_NAME" \
         --window-pos 200 120 \
-        --window-size 600 300 \
+        --window-size 640 340 \
         --icon-size 100 \
-        --icon "$APP_NAME.app" 175 120 \
+        --icon "$APP_NAME.app" 175 140 \
         --hide-extension "$APP_NAME.app" \
-        --app-drop-link 425 120 \
+        --app-drop-link 440 140 \
         "$DMG_FILE" \
         "$DMG_DIR/"
 else
+    echo "ℹ️  create-dmg absent (brew install create-dmg) : lien Applications ajouté à la main dans le dossier source."
+    # Comme sur les DMG habituels : glisser l’app vers Applications sans create-dmg
+    ln -sf /Applications "$DMG_DIR/Applications"
     hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_DIR" -ov -format UDZO "$DMG_FILE"
+fi
+
+# Quarantine / métadonnées : évite « L’application est endommagée » après téléchargement
+if [[ -f "$DMG_FILE" ]]; then
+  echo "🧹 xattr -cr sur le .dmg…"
+  xattr -cr "$DMG_FILE" 2>/dev/null || true
 fi
 
 # 3. Créer le .zip pour la mise à jour auto

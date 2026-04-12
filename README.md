@@ -60,11 +60,7 @@ pip install -r requirements.txt
 
 Les releases publient les fichiers `Mnemos-*.zip` / `Mnemos-*.dmg` (voir `GITHUB_REPO` dans `quiz_rappel_gui.py`). Les anciennes releases peuvent encore porter le préfixe `Mnémos-` ; l’app les reconnaît encore.
 
-Après création du .dmg, il faut supprimer les attributs systemes pour éviter le message "L'application est endommagée" :
-
-```bash
-xattr -cr /path/to/Mnemos-*.dmg
-```
+Le script `scripts/build_dmg.sh` (et donc `make dmg` / `make release`) exécute déjà `xattr -cr` sur le fichier `.dmg` produit. Si tu copies un `.dmg` téléchargé ailleurs et que macOS bloque encore, tu peux refaire manuellement : `xattr -cr /chemin/vers/Mnemos-*.dmg`.
 
 ---
 

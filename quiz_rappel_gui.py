@@ -64,7 +64,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.6.1"
+VERSION = "1.6.2"
 # Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -1017,9 +1017,9 @@ class QuizApp(tk.Tk):
         btn.bind("<Leave>", lambda e: btn.configure(bg=bg, highlightbackground=BORDER_ACCENT))
         return btn
 
-    def make_card(self, parent, **kwargs):
-        """Carte avec bordure subtile et padding généreux."""
-        card = tk.Frame(parent, bg=BG_CARD, padx=24, pady=18,
+    def make_card(self, parent, padx=24, pady=18, **kwargs):
+        """Carte avec bordure subtile et padding généreux (padx/pady surchargeables)."""
+        card = tk.Frame(parent, bg=BG_CARD, padx=padx, pady=pady,
                         highlightthickness=1, highlightbackground=BORDER_ACCENT, **kwargs)
         return card
 
