@@ -64,7 +64,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.6.5"
+VERSION = "1.6.6"
 # Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -271,26 +271,24 @@ DEFAULT_WEEKLY_PLAN_DAYS = [
     "Repos actif : uniquement les maîtrisés en doute ou rien — éviter la surcharge.",
 ]
 
-# Texte du bouton « Conseil » : rappels généraux + six principes regroupés (pas d’écran séparé)
-CONSEIL_TEXTE_INTRO = (
-    "Rappels utiles pour progresser avec le système majeur :\n\n"
-    "• Révise en petites sessions plutôt qu’en un seul bloc rare.\n"
-    "• Varie les sens (nombre → mot et mot → nombre) dès que c’est fluide dans un seul sens.\n"
-    "• Utilise des images vivantes, exagérées, avec action et émotion.\n"
-    "• Enchaîne les chiffres en histoire dans un lieu que tu connais bien.\n"
-    "• Reviens aux erreurs le lendemain : la courbe d’oubli se bat avec des reprises espacées.\n"
-    "• Ne cherche pas la perfection immédiate : la vitesse vient après la précision.\n\n"
-    "Six points à garder en tête :\n\n"
+# Texte du bouton « Conseil » (fenêtre modale)
+CONSEIL_TEXTE_COMPLET = (
+    "Applique ces trois étapes uniquement sur la zone de focus du jour (sauf le jeudi) :\n\n"
+    "1. Le Scan (2 min) : Fais défiler les nombres de ta zone. Si l'image (ex: Dalle pour 82) "
+    "est instantanée, passe. Si tu bloques plus d'une seconde, note-le mentalement.\n\n"
+    "2. La Sensation (3 min) : Sur les mots qui ont bloqué, force le trait. Ne regarde pas "
+    "l'objet, touche-le. Sens le froid de l'acier du Frein (91) ou la texture visqueuse du "
+    "Foie (93).\n\n"
+    "3. L'Action (5 min) : Prends un chiffre de ta zone et un autre au hasard dans toute la "
+    "table. Crée une interaction violente ou absurde. Exemple : Ta Batte (24) fracasse ton "
+    "Disque de Frein (91) dans une explosion d'étincelles.\n\n"
+    "• Loi de Pareto : Si le Sapin (1) est gravé dans ton crâne, ne perds plus jamais une "
+    "seconde dessus. Concentre-toi sur tes \"points noirs\".\n\n"
+    "• Vitesse : Ton but ultime est de faire le tour complet (0-100) en moins de 90 secondes."
+    "\n\n"
+    "• Angle de vue : Pour renforcer une image, change d'angle. Visualise ton Foret (93) de "
+    "très près ou en train de rougir sous la chaleur de ton Feu (92).\n"
 )
-
-CONSEIL_SIX_POINTS = [
-    "Clarté : une image nette vaut mieux qu’une scène surchargée.",
-    "Régularité : mieux vaut 10 minutes par jour qu’une heure le dimanche seulement.",
-    "Mesure : note ce qui coince (points faibles dans l’app) et cible-les.",
-    "Calme : si tu bloques, respire et simplifie l’image avant de forcer.",
-    "Cohérence : garde les mêmes mots-clés que ta table pour ne pas créer de doubles associations.",
-    "Patience : les gros nombres et les séries longues sont un entraînement, pas un examen unique.",
-]
 
 
 def _parse_nombre_int(n):
@@ -340,10 +338,7 @@ def _pairs_in_bloc_indices(table, bloc_i):
 
 def _conseil_full_text():
     """Texte affiché dans la fenêtre Conseil."""
-    lines = [CONSEIL_TEXTE_INTRO]
-    for i, line in enumerate(CONSEIL_SIX_POINTS, start=1):
-        lines.append(f"{i}. {line}\n")
-    return "".join(lines)
+    return CONSEIL_TEXTE_COMPLET
 
 
 def _icon_path():
@@ -459,6 +454,31 @@ def save_weekly_plan_days(days):
         f.flush()
         os.fsync(f.fileno())
     return clean
+
+
+def parse_imported_weekly_plan_file(path):
+    """
+    Lit un fichier JSON exporté du plan : liste de 7+ chaînes, ou dict lundi…dimanche.
+    """
+    with open(path, encoding="utf-8", errors="replace") as f:
+        data = json.load(f)
+    if isinstance(data, list):
+        if len(data) < 7:
+            raise ValueError(
+                "Le fichier doit contenir au moins 7 entrées (Lundi → Dimanche).",
+            )
+        return [str(data[i]).strip() for i in range(7)]
+    if isinstance(data, dict):
+        keys = (
+            "lundi", "mardi", "mercredi", "jeudi",
+            "vendredi", "samedi", "dimanche",
+        )
+        if all(k in data for k in keys):
+            return [str(data[k]).strip() for k in keys]
+    raise ValueError(
+        "Format invalide : attendu une liste JSON d’au moins 7 textes, "
+        "ou un objet avec les clés lundi … dimanche.",
+    )
 
 
 def load_preferences():
@@ -953,9 +973,15 @@ def _stats_key(nombre, mot):
     return f"{nombre}{STATS_KEY_SEP}{mot}"
 
 
+def _norm_pair(pair):
+    """Clé logique (nombre, mot) pour fusionner fichier ↔ table (ex. 82 vs \"82\")."""
+    n, m = pair[0], pair[1]
+    return (str(n).strip(), str(m).strip())
+
+
 def load_stats(table):
-    """Charge les stats depuis stats.json."""
-    stats = {}
+    """Charge les stats depuis stats.json (ignore les paires absentes de la table)."""
+    raw = {}
     path = _stats_path()
     if os.path.exists(path):
         try:
@@ -964,17 +990,27 @@ def load_stats(table):
                 for key, vals in data.items():
                     if STATS_KEY_SEP in key and isinstance(vals, list) and len(vals) >= 3:
                         n, m = key.split(STATS_KEY_SEP, 1)
-                        stats[(n, m)] = _normalize_stats_vals(vals)
+                        pn = _norm_pair((n, m))
+                        raw[pn] = _normalize_stats_vals(vals)
         except (json.JSONDecodeError, TypeError):
             pass
+    stats = {}
     for nombre, mot in table:
-        if (nombre, mot) not in stats:
-            stats[(nombre, mot)] = _default_stats_row()
+        pn = _norm_pair((nombre, mot))
+        row = raw.get(pn)
+        stats[(nombre, mot)] = (
+            list(row) if row is not None else _default_stats_row()
+        )
     return stats
 
 
-def save_stats(stats):
-    """Sauvegarde les stats en JSON (écriture immédiate)."""
+def save_stats(stats, table=None):
+    """Sauvegarde les stats en JSON (écriture immédiate). Purge les orphelins si `table` est fourni."""
+    if table is not None:
+        valid = {_norm_pair(p) for p in table}
+        for k in list(stats.keys()):
+            if _norm_pair(k) not in valid:
+                del stats[k]
     path = _stats_path()
     data = {
         _stats_key(n, m): [int(v[0]), int(v[1]), float(v[2]), float(v[3])]
@@ -1043,7 +1079,7 @@ class QuizApp(tk.Tk):
     def _on_quit(self):
         """Sauvegarde les stats avant de fermer."""
         try:
-            save_stats(self.stats)
+            save_stats(self.stats, self.table)
         except Exception:
             pass
         self.destroy()
@@ -1125,18 +1161,6 @@ class QuizApp(tk.Tk):
         for key in ("r", "f", "p"):
             self.unbind(key)
 
-        # Bandeau : logo seul en haut à gauche (clic = À propos)
-        header = tk.Frame(self.container, bg=BG_DARK)
-        header.pack(fill="x", padx=20, pady=(10, 2))
-
-        logo_img = _load_logo_photo(52)
-        if logo_img:
-            self._logo_ref = logo_img
-            logo_lbl = tk.Label(header, image=logo_img, bg=BG_DARK)
-            logo_lbl.pack(side="left", anchor="nw")
-            logo_lbl.bind("<Button-1>", lambda e: self._show_about())
-            logo_lbl.config(cursor="hand2")
-
         # Stats résumé
         total = len(self.stats)
         bien_connus = sum(1 for v in self.stats.values() if v[0] + v[1] >= 4)
@@ -1150,10 +1174,10 @@ class QuizApp(tk.Tk):
         )
 
         stats_frame = self.make_card(self.container, padx=14, pady=8)
-        stats_frame.pack(pady=(4, 10), padx=20, fill="x")
+        stats_frame.pack(pady=(16, 10), padx=20, fill="x")
 
-        # Barre de maîtrise (fine)
-        bar_canvas = tk.Canvas(stats_frame, height=6, bg=BTN_BG,
+        # Barre de maîtrise
+        bar_canvas = tk.Canvas(stats_frame, height=10, bg=BTN_BG,
                                highlightthickness=0)
         bar_canvas.pack(fill="x", pady=(0, 6))
         self.after(50, lambda: self._draw_mastery_bar(
@@ -1244,22 +1268,38 @@ class QuizApp(tk.Tk):
         self.make_button(
             io_row, "📥  Importer une table…", self._import_table_file, width=22,
         ).pack(side="left", padx=5)
+        self.make_button(
+            io_row, "📤  Exporter le plan…", self._export_weekly_plan_file, width=20,
+        ).pack(side="left", padx=5)
+        self.make_button(
+            io_row, "📥  Importer le plan…", self._import_weekly_plan_file, width=20,
+        ).pack(side="left", padx=5)
 
-        # Footer
+        # Pied : logo en bas à gauche (clic = À propos) · raccourcis · mise à jour
         footer_row = tk.Frame(self.container, bg=BG_DARK)
-        footer_row.pack(side="bottom", pady=(0, 10))
-        tk.Label(
-            footer_row,
-            text="Raccourcis : 1-5 = modes · P = conseil · Échap = menu · Entrée = valider",
-            font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
-        ).pack(side="left")
-        # Lien mise à jour
+        footer_row.pack(side="bottom", fill="x", padx=12, pady=(0, 10))
+
+        logo_img = _load_logo_photo(52)
+        if logo_img:
+            self._logo_ref = logo_img
+            logo_lbl = tk.Label(footer_row, image=logo_img, bg=BG_DARK)
+            logo_lbl.pack(side="left", anchor="w")
+            logo_lbl.bind("<Button-1>", lambda e: self._show_about())
+            logo_lbl.config(cursor="hand2")
+
+        right_foot = tk.Frame(footer_row, bg=BG_DARK)
+        right_foot.pack(side="right")
         upd_lbl = tk.Label(
-            footer_row, text="  ·  🔄 Vérifier les mises à jour",
+            right_foot, text="🔄 Vérifier les mises à jour",
             font=FONT_SMALL, bg=BG_DARK, fg=FG_ACCENT, cursor="hand2",
         )
-        upd_lbl.pack(side="left")
+        upd_lbl.pack(side="right", padx=(12, 0))
         upd_lbl.bind("<Button-1>", lambda e: self._check_update())
+        tk.Label(
+            right_foot,
+            text="Raccourcis : 1-5 = modes · P = conseil · Échap = menu · Entrée = valider",
+            font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
+        ).pack(side="right")
 
     def show_preferences(self):
         """Réglages : délais d'auto-avance après bonne / mauvaise réponse (ms, 0 = off)."""
@@ -1538,7 +1578,7 @@ class QuizApp(tk.Tk):
         self.make_button(bar, "Annuler", editor.destroy).pack(side="left", padx=6)
 
     def _show_conseil_dialog(self):
-        """Rappels généraux + six points regroupés ; option pour ouvrir le PDF."""
+        """Méthode Scan / Sensation / Action ; option pour ouvrir le PDF du plan."""
         win = tk.Toplevel(self)
         win.title("Conseil")
         win.configure(bg=BG_DARK)
@@ -2221,7 +2261,7 @@ class QuizApp(tk.Tk):
                     )
             else:
                 self.stats[(nombre, mot)][1] -= 1
-        save_stats(self.stats)
+        save_stats(self.stats, self.table)
 
     def _submit_answer(self):
         answer = self.answer_var.get().strip().lower()
@@ -2357,7 +2397,7 @@ class QuizApp(tk.Tk):
     def _show_results(self):
         self.unbind("<Return>")
         self.clear()
-        save_stats(self.stats)
+        save_stats(self.stats, self.table)
 
         total_time = time.time() - self.quiz_start_time
         total_q = len(self.questions)
@@ -2934,7 +2974,7 @@ class QuizApp(tk.Tk):
         ):
             for key in self.stats:
                 self.stats[key] = _default_stats_row()
-            save_stats(self.stats)
+            save_stats(self.stats, self.table)
             self.show_stats_view()
 
     def _switch_stats_tab(self, tab):
@@ -3393,7 +3433,7 @@ class QuizApp(tk.Tk):
 
         self.table = _sort_table_pairs(self.table)
         self._persist_table()
-        save_stats(self.stats)
+        save_stats(self.stats, self.table)
 
         if changes > 0:
             messagebox.showinfo(
@@ -3465,11 +3505,13 @@ class QuizApp(tk.Tk):
             "conservent leurs stats.",
         ):
             return
+        by_norm = {_norm_pair(k): list(v) for k, v in self.stats.items()}
         merged = {}
         new_table = _sort_table_pairs(list(new_table))
         for n, m in new_table:
             key = (n, m)
-            merged[key] = list(self.stats.get(key, _default_stats_row()))
+            row = by_norm.get(_norm_pair(key))
+            merged[key] = list(row) if row is not None else _default_stats_row()
         self.table = new_table
         self.stats = merged
         self.manual_weak = save_manual_weak_set(
@@ -3491,7 +3533,54 @@ class QuizApp(tk.Tk):
             json.dump(data, f, ensure_ascii=False, indent=0)
             f.flush()
             os.fsync(f.fileno())
-        save_stats(self.stats)
+        save_stats(self.stats, self.table)
+
+    def _export_weekly_plan_file(self):
+        """Exporte le plan hebdomadaire en JSON (7 chaînes)."""
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Exporter le plan hebdomadaire",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json")],
+        )
+        if not path:
+            return
+        try:
+            days = load_weekly_plan_days()
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(days, f, ensure_ascii=False, indent=2)
+            messagebox.showinfo(
+                "Export réussi",
+                f"Plan des 7 jours enregistré dans :\n{path}",
+            )
+        except OSError as e:
+            messagebox.showerror("Export", str(e))
+
+    def _import_weekly_plan_file(self):
+        """Importe un plan depuis JSON (liste ≥7 ou dict jours)."""
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Importer le plan hebdomadaire",
+            filetypes=[
+                ("JSON", "*.json"),
+                ("Tous les fichiers", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        try:
+            days = parse_imported_weekly_plan_file(path)
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            messagebox.showerror("Import", str(e))
+            return
+        if not messagebox.askyesno(
+            "Importer le plan",
+            "Remplacer le plan actuel (7 jours) par le contenu du fichier ?",
+        ):
+            return
+        save_weekly_plan_days(days)
+        messagebox.showinfo("Import réussi", "Plan enregistré.")
+        self.show_main_menu()
 
 
 # ============================================================
