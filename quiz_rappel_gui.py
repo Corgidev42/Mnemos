@@ -40,6 +40,7 @@ if sys.platform == "darwin":
             _TK_MAC_PTY_MASTER = None
 
 import csv
+import datetime
 import json
 import re
 import random
@@ -61,7 +62,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.5.5"
+VERSION = "1.6.0"
 # Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -218,6 +219,97 @@ def _weekly_plan_pdf_path():
     return os.path.join(_app_resource_dir(), "Plan_hebdomadaire_Mnemos.pdf")
 
 
+# Jours d’affichage (Lundi = 0, comme datetime.weekday())
+WEEKDAY_LABELS_FR = (
+    "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche",
+)
+
+# Plan hebdomadaire par défaut (éditable dans l’app, sauvegardé dans App Support)
+DEFAULT_WEEKLY_PLAN_DAYS = [
+    "Blocs 0–29 : révision active + erreurs récentes (stats « à revoir »).",
+    "Blocs 30–59 : quiz mélange N→M et M→N, vitesse modérée.",
+    "Blocs 60–89 : focus sur les images encore floues ; mode flashcards.",
+    "Blocs 90–100 (et au-delà si tu en as) : consolidation ; toute la table en ordre croissant une fois.",
+    "Jeu libre : aléatoire ou focus points faibles ; noter les 5 plus lents.",
+    "Rappel léger : parcours rapide de toute la table (sans pression).",
+    "Repos actif : uniquement les maîtrisés en doute ou rien — éviter la surcharge.",
+]
+
+# Texte du bouton « Conseil » : rappels généraux + six principes regroupés (pas d’écran séparé)
+CONSEIL_TEXTE_INTRO = (
+    "Rappels utiles pour progresser avec le système majeur :\n\n"
+    "• Révise en petites sessions plutôt qu’en un seul bloc rare.\n"
+    "• Varie les sens (nombre → mot et mot → nombre) dès que c’est fluide dans un seul sens.\n"
+    "• Utilise des images vivantes, exagérées, avec action et émotion.\n"
+    "• Enchaîne les chiffres en histoire dans un lieu que tu connais bien.\n"
+    "• Reviens aux erreurs le lendemain : la courbe d’oubli se bat avec des reprises espacées.\n"
+    "• Ne cherche pas la perfection immédiate : la vitesse vient après la précision.\n\n"
+    "Six points à garder en tête :\n\n"
+)
+
+CONSEIL_SIX_POINTS = [
+    "Clarté : une image nette vaut mieux qu’une scène surchargée.",
+    "Régularité : mieux vaut 10 minutes par jour qu’une heure le dimanche seulement.",
+    "Mesure : note ce qui coince (points faibles dans l’app) et cible-les.",
+    "Calme : si tu bloques, respire et simplifie l’image avant de forcer.",
+    "Cohérence : garde les mêmes mots-clés que ta table pour ne pas créer de doubles associations.",
+    "Patience : les gros nombres et les séries longues sont un entraînement, pas un examen unique.",
+]
+
+
+def _parse_nombre_int(n):
+    """Entier du nombre de la table, ou None si non interprétable."""
+    try:
+        return int(str(n).strip())
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _sort_table_pairs(table):
+    """Tri affichage / quiz « ordre croissant » : entiers d’abord, puis le reste au lexicographique."""
+
+    def key_row(row):
+        n = row[0]
+        v = _parse_nombre_int(n)
+        if v is not None:
+            return (0, v, str(n))
+        return (1, str(n), str(n))
+
+    return sorted(table, key=key_row)
+
+
+def _bloc_count_for_table(table):
+    """Nombre de blocs de 10 (0–9, 10–19, …) pour couvrir la table ; au moins 11 (0–100+)."""
+    hi = -1
+    for n, _ in table:
+        v = _parse_nombre_int(n)
+        if v is not None:
+            hi = max(hi, v)
+    if hi < 0:
+        return 11
+    return max(11, (hi // 10) + 1)
+
+
+def _pairs_in_bloc_indices(table, bloc_i):
+    """Paires dont le nombre est dans [bloc_i*10, bloc_i*10+9]."""
+    start = bloc_i * 10
+    end = start + 9
+    out = []
+    for p in table:
+        v = _parse_nombre_int(p[0])
+        if v is not None and start <= v <= end:
+            out.append(p)
+    return out
+
+
+def _conseil_full_text():
+    """Texte affiché dans la fenêtre Conseil."""
+    lines = [CONSEIL_TEXTE_INTRO]
+    for i, line in enumerate(CONSEIL_SIX_POINTS, start=1):
+        lines.append(f"{i}. {line}\n")
+    return "".join(lines)
+
+
 def _icon_path():
     """Chemin de l'icône (dev ou .app)."""
     base = _app_resource_dir()
@@ -292,6 +384,45 @@ def _table_path():
 
 def _prefs_path():
     return os.path.join(_get_app_support_dir(), "preferences.json")
+
+
+def _weekly_plan_user_path():
+    return os.path.join(_get_app_support_dir(), "weekly_plan.json")
+
+
+def load_weekly_plan_days():
+    """
+    Charge les 7 textes du plan (Lundi → Dimanche).
+    Fichier : liste JSON de 7 chaînes, ou dict { "lundi": "...", ... }.
+    """
+    path = _weekly_plan_user_path()
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list) and len(data) >= 7:
+                return [str(data[i]).strip() for i in range(7)]
+            if isinstance(data, dict):
+                keys = (
+                    "lundi", "mardi", "mercredi", "jeudi",
+                    "vendredi", "samedi", "dimanche",
+                )
+                if all(k in data for k in keys):
+                    return [str(data[k]).strip() for k in keys]
+        except (OSError, json.JSONDecodeError, TypeError, KeyError):
+            pass
+    return list(DEFAULT_WEEKLY_PLAN_DAYS)
+
+
+def save_weekly_plan_days(days):
+    """Enregistre le plan (exactement 7 chaînes)."""
+    clean = [str(days[i]).strip() if i < len(days) else "" for i in range(7)]
+    path = _weekly_plan_user_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(clean, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    return clean
 
 
 def load_preferences():
@@ -604,7 +735,7 @@ def load_table():
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-                return [tuple(row) for row in data]
+                return _sort_table_pairs([tuple(row) for row in data])
         except (json.JSONDecodeError, TypeError):
             pass
     return list(TABLE_EMBEDDED)
@@ -729,16 +860,16 @@ class QuizApp(tk.Tk):
         super().__init__()
         self.title(f"{APP_NAME} — Quiz v{VERSION}")
         self.configure(bg=BG_DARK)
-        self.minsize(960, 700)
-        self.geometry("1000x740")
+        self.minsize(1020, 720)
+        self.geometry("1160x760")
 
         # Centrage fenêtre
         self.update_idletasks()
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        x = (sw - 1000) // 2
-        y = (sh - 740) // 2
-        self.geometry(f"1000x740+{x}+{y}")
+        x = (sw - 1160) // 2
+        y = (sh - 760) // 2
+        self.geometry(f"1160x760+{x}+{y}")
 
         # Données
         self.table = load_table()
@@ -818,18 +949,31 @@ class QuizApp(tk.Tk):
         return card
 
     @staticmethod
-    def _bind_mousewheel(canvas):
-        """Scroll compatible macOS + Linux + Windows."""
-        def _on_mousewheel(event):
-            # macOS trackpad : event.delta est en pixels (grand)
-            if abs(event.delta) > 10:
-                canvas.yview_scroll(-1 * (event.delta // 3), "units")
-            else:
-                canvas.yview_scroll(-1 * event.delta, "units")
+    def _bind_mousewheel(widget):
+        """Défilement molette sur le widget (Canvas, Text, etc.) — pas de bind global."""
 
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-3, "units"))
-        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(3, "units"))
+        def _on_mousewheel(event):
+            if sys.platform == "win32":
+                # Windows : delta multiple de 120 par cran ; ancien code scrollait trop fort.
+                step = int(-event.delta / 120)
+                if step == 0:
+                    step = -1 if event.delta > 0 else 1
+                widget.yview_scroll(step, "units")
+            elif sys.platform == "darwin":
+                d = event.delta
+                if abs(d) > 100:
+                    widget.yview_scroll(int(-d / 40), "units")
+                elif abs(d) > 8:
+                    widget.yview_scroll(int(-d / 12), "units")
+                else:
+                    widget.yview_scroll(-1 if d > 0 else 1, "units")
+            else:
+                if event.delta:
+                    widget.yview_scroll(int(-event.delta / 120), "units")
+
+        widget.bind("<MouseWheel>", _on_mousewheel)
+        widget.bind("<Button-4>", lambda e: widget.yview_scroll(-2, "units"))
+        widget.bind("<Button-5>", lambda e: widget.yview_scroll(2, "units"))
 
     # --------------------------------------------------------
     # Écran : Menu principal
@@ -883,7 +1027,7 @@ class QuizApp(tk.Tk):
         )
 
         stats_frame = self.make_card(self.container)
-        stats_frame.pack(pady=(0, 20), padx=60, fill="x")
+        stats_frame.pack(pady=(0, 16), padx=36, fill="x")
 
         # Barre de maîtrise
         bar_canvas = tk.Canvas(stats_frame, height=12, bg=BTN_BG,
@@ -910,9 +1054,15 @@ class QuizApp(tk.Tk):
             tk.Label(col, text=label, font=FONT_SMALL,
                      bg=BG_CARD, fg=FG_SECONDARY).pack()
 
-        # ---- Modes de quiz ----
-        modes_frame = tk.Frame(self.container, bg=BG_DARK)
-        modes_frame.pack(pady=5)
+        # ---- Deux colonnes : modes | plan hebdomadaire ----
+        mid = tk.Frame(self.container, bg=BG_DARK)
+        mid.pack(fill="both", expand=True, padx=28, pady=(0, 6))
+
+        left_col = tk.Frame(mid, bg=BG_DARK)
+        left_col.pack(side="left", fill="both", expand=True, padx=(0, 14))
+
+        modes_frame = tk.Frame(left_col, bg=BG_DARK)
+        modes_frame.pack(fill="x", pady=(0, 4))
 
         modes = [
             ("1", "📦  Quiz par bloc", self.show_bloc_config),
@@ -924,38 +1074,41 @@ class QuizApp(tk.Tk):
         for key, text, cmd in modes:
             row = tk.Frame(modes_frame, bg=BG_DARK)
             row.pack(fill="x", pady=3)
-            # Raccourci clavier
             tk.Label(row, text=key, font=FONT_BODY_BOLD, bg=BG_INPUT,
                      fg=FG_ACCENT, width=3, pady=2).pack(side="left", padx=(0, 8))
-            self.make_button(row, text, cmd, width=32).pack(side="left")
+            self.make_button(row, text, cmd, width=30).pack(side="left")
 
-        # Raccourcis clavier 1–5
         for key, _, cmd in modes:
             self.bind(key, lambda e, c=cmd: c())
-        self.bind("p", lambda e: self._open_weekly_plan_pdf())
+        self.bind("p", lambda e: self._show_conseil_dialog())
+
+        right_col = tk.Frame(mid, bg=BG_DARK, width=360)
+        right_col.pack(side="right", fill="y", padx=(10, 0))
+        right_col.pack_propagate(False)
+        self._build_home_weekly_plan_panel(right_col)
 
         # ---- Boutons secondaires ----
         bottom_frame = tk.Frame(self.container, bg=BG_DARK)
-        bottom_frame.pack(pady=(15, 10))
+        bottom_frame.pack(pady=(12, 8))
         self.make_button(
-            bottom_frame, "📊  Statistiques", self.show_stats_view, width=25,
-        ).pack(side="left", padx=5)
+            bottom_frame, "📊  Statistiques", self.show_stats_view, width=22,
+        ).pack(side="left", padx=4)
         self.make_button(
             bottom_frame, "📖  Parcourir la table", self.show_table_view,
-            width=25,
-        ).pack(side="left", padx=5)
+            width=22,
+        ).pack(side="left", padx=4)
         self.make_button(
-            bottom_frame, "⚙️  Préférences", self.show_preferences, width=18,
-        ).pack(side="left", padx=5)
+            bottom_frame, "⚙️  Préférences", self.show_preferences, width=16,
+        ).pack(side="left", padx=4)
         self.make_button(
             bottom_frame,
-            "📅  Plan hebdomadaire (PDF)",
-            self._open_weekly_plan_pdf,
-            width=26,
-        ).pack(side="left", padx=5)
+            "💡  Conseil",
+            self._show_conseil_dialog,
+            width=18,
+        ).pack(side="left", padx=4)
 
         io_row = tk.Frame(self.container, bg=BG_DARK)
-        io_row.pack(pady=(0, 5))
+        io_row.pack(pady=(0, 4))
         self.make_button(
             io_row, "📤  Exporter la table…", self._export_table_file, width=22,
         ).pack(side="left", padx=5)
@@ -968,7 +1121,7 @@ class QuizApp(tk.Tk):
         footer_row.pack(side="bottom", pady=(0, 10))
         tk.Label(
             footer_row,
-            text="Raccourcis : 1-5 = modes · P = plan hebdo · Échap = menu · Entrée = valider",
+            text="Raccourcis : 1-5 = modes · P = conseil · Échap = menu · Entrée = valider",
             font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
         ).pack(side="left")
         # Lien mise à jour
@@ -1106,6 +1259,177 @@ class QuizApp(tk.Tk):
                 f"Impossible d’ouvrir le PDF :\n{exc}",
             )
 
+    def _build_home_weekly_plan_panel(self, parent):
+        """Panneau d’accueil : titre, 7 cases, jour courant mis en avant."""
+        for w in parent.winfo_children():
+            w.destroy()
+
+        plan_card = self.make_card(parent, padx=14, pady=12)
+        plan_card.pack(fill="both", expand=True)
+
+        tk.Label(
+            plan_card, text="Plan de la semaine",
+            font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_ACCENT,
+        ).pack(anchor="w", pady=(0, 2))
+        tk.Label(
+            plan_card,
+            text="Aujourd’hui est un peu plus lumineux. Modifie le texte à ta façon.",
+            font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
+            wraplength=320, justify="left",
+        ).pack(anchor="w", pady=(0, 8))
+
+        today_i = datetime.date.today().weekday()
+        days = load_weekly_plan_days()
+
+        for i, label in enumerate(WEEKDAY_LABELS_FR):
+            is_today = i == today_i
+            wrap_bg = "#2a2040" if is_today else BG_INPUT
+            border = FG_GOLD if is_today else BORDER_ACCENT
+            thick = 2 if is_today else 1
+
+            cell = tk.Frame(
+                plan_card, bg=wrap_bg, padx=2, pady=2,
+                highlightthickness=thick, highlightbackground=border,
+            )
+            cell.pack(fill="x", pady=4)
+
+            inner = tk.Frame(cell, bg=BG_CARD, padx=8, pady=6)
+            inner.pack(fill="x")
+
+            title = f"● {label}" if is_today else label
+            title_fg = FG_GOLD if is_today else FG_PRIMARY
+            tk.Label(
+                inner, text=title, font=FONT_BODY_BOLD,
+                bg=BG_CARD, fg=title_fg,
+            ).pack(anchor="w")
+
+            body = days[i] if i < len(days) else ""
+            tk.Label(
+                inner, text=body or "—",
+                font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
+                wraplength=300, justify="left", anchor="w",
+            ).pack(anchor="w", pady=(2, 0))
+
+        btn_row = tk.Frame(plan_card, bg=BG_CARD)
+        btn_row.pack(fill="x", pady=(10, 0))
+        self.make_button(
+            btn_row, "✏️  Modifier le plan…", self._open_weekly_plan_editor,
+            width=22,
+        ).pack(side="left")
+
+    def _open_weekly_plan_editor(self):
+        """Fenêtre modale : un champ par jour, sauvegarde dans App Support."""
+        editor = tk.Toplevel(self)
+        editor.title("Modifier le plan hebdomadaire")
+        editor.configure(bg=BG_DARK)
+        editor.transient(self)
+        editor.grab_set()
+        editor.geometry("640x520")
+        editor.minsize(520, 400)
+
+        tk.Label(
+            editor, text="Plan hebdomadaire",
+            font=FONT_TITLE, bg=BG_DARK, fg=FG_ACCENT,
+        ).pack(pady=(16, 6))
+        tk.Label(
+            editor,
+            text="Un bloc par jour (Lundi → Dimanche). Les changements sont enregistrés sur ce Mac.",
+            font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
+            wraplength=580,
+        ).pack(pady=(0, 10))
+
+        outer = tk.Frame(editor, bg=BG_DARK)
+        outer.pack(fill="both", expand=True, padx=18, pady=6)
+
+        canvas = tk.Canvas(outer, bg=BG_DARK, highlightthickness=0)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=BG_DARK)
+        inner.bind(
+            "<Configure>",
+            lambda e, c=canvas: c.configure(scrollregion=c.bbox("all")),
+        )
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self._bind_mousewheel(canvas)
+
+        current = load_weekly_plan_days()
+        text_widgets = []
+        for i, day_name in enumerate(WEEKDAY_LABELS_FR):
+            block = tk.Frame(inner, bg=BG_CARD, padx=10, pady=8,
+                             highlightthickness=1, highlightbackground=BORDER_ACCENT)
+            block.pack(fill="x", pady=6)
+            tk.Label(
+                block, text=day_name, font=FONT_BODY_BOLD,
+                bg=BG_CARD, fg=FG_ACCENT,
+            ).pack(anchor="w")
+            t = tk.Text(
+                block, height=3, width=72, font=FONT_BODY,
+                bg=BG_INPUT, fg=FG_PRIMARY, insertbackground=FG_PRIMARY,
+                relief="flat", wrap="word",
+            )
+            t.pack(fill="x", pady=(6, 0))
+            t.insert("1.0", current[i] if i < len(current) else "")
+            text_widgets.append(t)
+
+        def _save_plan():
+            out = [tw.get("1.0", "end").strip() for tw in text_widgets]
+            save_weekly_plan_days(out)
+            messagebox.showinfo("Plan", "Plan enregistré.", parent=editor)
+            editor.destroy()
+            if self.container.winfo_children():
+                self.show_main_menu()
+
+        bar = tk.Frame(editor, bg=BG_DARK)
+        bar.pack(pady=(10, 14))
+        self.make_button(bar, "💾  Enregistrer", _save_plan, accent=True).pack(
+            side="left", padx=6,
+        )
+        self.make_button(bar, "Annuler", editor.destroy).pack(side="left", padx=6)
+
+    def _show_conseil_dialog(self):
+        """Rappels généraux + six points regroupés ; option pour ouvrir le PDF."""
+        win = tk.Toplevel(self)
+        win.title("Conseil")
+        win.configure(bg=BG_DARK)
+        win.transient(self)
+        win.geometry("620x480")
+        win.minsize(480, 360)
+
+        tk.Label(
+            win, text="💡  Conseil",
+            font=FONT_TITLE, bg=BG_DARK, fg=FG_ACCENT,
+        ).pack(pady=(14, 6))
+
+        frame = tk.Frame(win, bg=BG_DARK)
+        frame.pack(fill="both", expand=True, padx=16, pady=6)
+
+        txt = tk.Text(
+            frame, wrap="word", font=FONT_BODY,
+            bg=BG_INPUT, fg=FG_PRIMARY, insertbackground=FG_PRIMARY,
+            relief="flat", padx=10, pady=10,
+        )
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=txt.yview)
+        txt.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        txt.pack(side="left", fill="both", expand=True)
+        txt.insert("1.0", _conseil_full_text())
+        txt.configure(state="disabled")
+        self._bind_mousewheel(txt)
+
+        bottom = tk.Frame(win, bg=BG_DARK)
+        bottom.pack(pady=(8, 12))
+        pdf_path = os.path.abspath(_weekly_plan_pdf_path())
+        if os.path.isfile(pdf_path):
+            self.make_button(
+                bottom, "📄  Ouvrir le PDF du plan (aperçu)",
+                self._open_weekly_plan_pdf, width=32,
+            ).pack(side="left", padx=6)
+        self.make_button(bottom, "Fermer", win.destroy, width=12).pack(
+            side="left", padx=6,
+        )
+
     def _show_about(self):
         """Affiche version et chemin de l'app."""
         app_path = _get_app_bundle_path()
@@ -1208,18 +1532,31 @@ class QuizApp(tk.Tk):
 
         tk.Label(
             card,
-            text="Sélectionne les blocs à réviser :",
+            text="Sélectionne les blocs à réviser (tranches de 10, selon ta table) :",
             font=FONT_BODY, bg=BG_CARD, fg=FG_SECONDARY, wraplength=600,
-        ).pack(pady=(5, 12))
+        ).pack(pady=(5, 8))
 
-        # Grille de blocs
-        blocs_frame = tk.Frame(card, bg=BG_CARD)
-        blocs_frame.pack(pady=5)
+        n_blocs = _bloc_count_for_table(self.table)
+        scroll_wrap = tk.Frame(card, bg=BG_CARD, height=168)
+        scroll_wrap.pack(fill="x", pady=4)
+        scroll_wrap.pack_propagate(False)
+        b_canvas = tk.Canvas(scroll_wrap, bg=BG_CARD, highlightthickness=0, height=160)
+        b_sb = ttk.Scrollbar(scroll_wrap, orient="vertical", command=b_canvas.yview)
+        blocs_frame = tk.Frame(b_canvas, bg=BG_CARD)
+        blocs_frame.bind(
+            "<Configure>",
+            lambda e, c=b_canvas: c.configure(scrollregion=c.bbox("all")),
+        )
+        b_canvas.create_window((0, 0), window=blocs_frame, anchor="nw")
+        b_canvas.configure(yscrollcommand=b_sb.set)
+        b_canvas.pack(side="left", fill="both", expand=True)
+        b_sb.pack(side="right", fill="y")
+        self._bind_mousewheel(b_canvas)
 
         self.bloc_vars = {}
-        for i in range(11):  # 0..10
+        for i in range(n_blocs):
             start = i * 10
-            end = min(start + 9, 100)
+            end = start + 9
             var = tk.BooleanVar(value=False)
             self.bloc_vars[i] = var
             cb = tk.Checkbutton(
@@ -1261,11 +1598,11 @@ class QuizApp(tk.Tk):
         row_b = tk.Frame(tens_frame, bg=BG_CARD)
         row_b.pack(fill="x")
         self.make_button(
-            row_b, "50 nombres pairs (0–98)", self._start_quiz_even_numbers,
+            row_b, "Tous les nombres pairs", self._start_quiz_even_numbers,
             width=24,
         ).pack(side="left", padx=4, pady=2)
         self.make_button(
-            row_b, "50 nombres impairs (1–99)", self._start_quiz_odd_numbers,
+            row_b, "Tous les nombres impairs", self._start_quiz_odd_numbers,
             width=24,
         ).pack(side="left", padx=4, pady=2)
 
@@ -1300,27 +1637,29 @@ class QuizApp(tk.Tk):
             v.set(i in (1, 3, 5, 7, 9))
 
     def _start_quiz_even_numbers(self):
-        pairs = [
-            p for p in self.table
-            if int(p[0]) < 100 and int(p[0]) % 2 == 0
-        ]
+        pairs = []
+        for p in self.table:
+            v = _parse_nombre_int(p[0])
+            if v is not None and v % 2 == 0:
+                pairs.append(p)
         if not pairs:
             messagebox.showwarning(
                 "Attention",
-                "Aucune paire nombre pair 0–98 dans la table.",
+                "Aucune paire avec nombre pair dans la table.",
             )
             return
         self._build_questions(pairs)
 
     def _start_quiz_odd_numbers(self):
-        pairs = [
-            p for p in self.table
-            if int(p[0]) < 100 and int(p[0]) % 2 != 0
-        ]
+        pairs = []
+        for p in self.table:
+            v = _parse_nombre_int(p[0])
+            if v is not None and v % 2 != 0:
+                pairs.append(p)
         if not pairs:
             messagebox.showwarning(
                 "Attention",
-                "Aucune paire nombre impair 1–99 dans la table.",
+                "Aucune paire avec nombre impair dans la table.",
             )
             return
         self._build_questions(pairs)
@@ -1351,10 +1690,7 @@ class QuizApp(tk.Tk):
             return
         pairs = []
         for bloc_i in selected:
-            start = bloc_i * 10
-            end = min(start + 9, 100)
-            pairs.extend(
-                [p for p in self.table if start <= int(p[0]) <= end])
+            pairs.extend(_pairs_in_bloc_indices(self.table, bloc_i))
         if not pairs:
             messagebox.showwarning("Attention",
                                    "Aucune correspondance pour ces blocs.")
@@ -1481,7 +1817,7 @@ class QuizApp(tk.Tk):
         ).pack(anchor="w", pady=(14, 2))
         tk.Label(
             card,
-            text="       Décoché : ordre croissant des nombres (0 → 100), sans mélange.",
+            text="       Décoché : ordre croissant des nombres, sans mélange.",
             font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY, wraplength=520,
             justify="left",
         ).pack(anchor="w")
@@ -1549,7 +1885,7 @@ class QuizApp(tk.Tk):
     def _build_questions(self, pairs, shuffle_questions=True):
         sens = self.sens_var.get()
         if not shuffle_questions:
-            pairs = sorted(pairs, key=lambda p: int(p[0]))
+            pairs = _sort_table_pairs(list(pairs))
         self.questions = []
         for nombre, mot in pairs:
             if sens in ("1", "3"):
@@ -1991,12 +2327,27 @@ class QuizApp(tk.Tk):
             font=FONT_BODY, bg=BG_CARD, fg=FG_SECONDARY,
         ).pack(anchor="w", pady=(5, 8))
 
-        blocs_frame = tk.Frame(card, bg=BG_CARD)
-        blocs_frame.pack(pady=5)
+        n_blocs_fc = _bloc_count_for_table(self.table)
+        fc_scroll = tk.Frame(card, bg=BG_CARD, height=168)
+        fc_scroll.pack(fill="x", pady=4)
+        fc_scroll.pack_propagate(False)
+        fc_canvas = tk.Canvas(fc_scroll, bg=BG_CARD, highlightthickness=0, height=160)
+        fc_sb = ttk.Scrollbar(fc_scroll, orient="vertical", command=fc_canvas.yview)
+        blocs_frame = tk.Frame(fc_canvas, bg=BG_CARD)
+        blocs_frame.bind(
+            "<Configure>",
+            lambda e, c=fc_canvas: c.configure(scrollregion=c.bbox("all")),
+        )
+        fc_canvas.create_window((0, 0), window=blocs_frame, anchor="nw")
+        fc_canvas.configure(yscrollcommand=fc_sb.set)
+        fc_canvas.pack(side="left", fill="both", expand=True)
+        fc_sb.pack(side="right", fill="y")
+        self._bind_mousewheel(fc_canvas)
+
         self.fc_bloc_vars = {}
-        for i in range(11):
+        for i in range(n_blocs_fc):
             start = i * 10
-            end = min(start + 9, 100)
+            end = start + 9
             var = tk.BooleanVar(value=False)
             self.fc_bloc_vars[i] = var
             tk.Checkbutton(
@@ -2070,10 +2421,7 @@ class QuizApp(tk.Tk):
             return
         pairs = []
         for bloc_i in selected:
-            start = bloc_i * 10
-            end = min(start + 9, 100)
-            pairs.extend(
-                [p for p in self.table if start <= int(p[0]) <= end])
+            pairs.extend(_pairs_in_bloc_indices(self.table, bloc_i))
         if not pairs:
             messagebox.showwarning(
                 "Attention", "Aucune correspondance pour ces blocs.")
@@ -2657,10 +3005,36 @@ class QuizApp(tk.Tk):
         ).pack(pady=(20, 5))
         tk.Label(
             self.container,
-            text="Modifie les mots associés à chaque nombre. "
-                 "Les changements sont sauvegardés au clic.",
+            text="Ajoute ou supprime des paires, ou modifie un mot. "
+                 "Chaque nombre ne peut exister qu’une seule fois. "
+                 "Sauvegarde au clic sur 💾 ou « Tout sauvegarder ».",
             font=FONT_BODY, bg=BG_DARK, fg=FG_SECONDARY,
-        ).pack(pady=(0, 10))
+            wraplength=720, justify="left",
+        ).pack(pady=(0, 8))
+
+        add_bar = tk.Frame(self.container, bg=BG_CARD, padx=12, pady=10,
+                           highlightthickness=1, highlightbackground=BORDER_ACCENT)
+        add_bar.pack(fill="x", padx=40, pady=(0, 8))
+        tk.Label(
+            add_bar, text="Nouvelle paire :", font=FONT_BODY_BOLD,
+            bg=BG_CARD, fg=FG_PRIMARY,
+        ).pack(side="left", padx=(0, 8))
+        add_n = tk.Entry(
+            add_bar, font=FONT_BODY, bg=BG_INPUT, fg=FG_PRIMARY,
+            insertbackground=FG_PRIMARY, relief="flat", width=10, justify="center",
+        )
+        add_n.pack(side="left", ipady=4)
+        tk.Label(add_bar, text="→", bg=BG_CARD, fg=FG_SECONDARY).pack(
+            side="left", padx=6)
+        add_m = tk.Entry(
+            add_bar, font=FONT_BODY, bg=BG_INPUT, fg=FG_PRIMARY,
+            insertbackground=FG_PRIMARY, relief="flat", width=22,
+        )
+        add_m.pack(side="left", ipady=4, padx=(0, 10))
+        self.make_button(
+            add_bar, "➕  Ajouter", lambda: self._add_new_table_row(add_n, add_m),
+            width=14,
+        ).pack(side="left")
 
         # Scrollable edit area
         edit_outer = tk.Frame(self.container, bg=BG_DARK)
@@ -2691,29 +3065,26 @@ class QuizApp(tk.Tk):
                  fg=FG_PRIMARY, width=20, anchor="center").pack(side="left")
         tk.Label(hdr, text="Nouveau mot", font=FONT_BODY_BOLD, bg=BTN_BG,
                  fg=FG_PRIMARY, width=20, anchor="center").pack(side="left")
-        tk.Label(hdr, text="", font=FONT_BODY_BOLD, bg=BTN_BG,
-                 fg=FG_PRIMARY, width=12).pack(side="left")
+        tk.Label(hdr, text="Actions", font=FONT_BODY_BOLD, bg=BTN_BG,
+                 fg=FG_PRIMARY, width=10, anchor="center").pack(side="left")
 
-        self._edit_entries = {}  # nombre -> StringVar
+        self._edit_entries = {}  # index ligne -> StringVar
 
-        for i, (nombre, mot) in enumerate(self.table):
-            row_bg = BG_CARD if i % 2 == 0 else BG_CARD_HOVER
+        for idx, (nombre, mot) in enumerate(self.table):
+            row_bg = BG_CARD if idx % 2 == 0 else BG_CARD_HOVER
             row = tk.Frame(inner, bg=row_bg, pady=4)
             row.pack(fill="x", pady=1)
 
-            # Nombre
             tk.Label(row, text=nombre, font=FONT_BODY_BOLD,
                      bg=row_bg, fg=FG_ACCENT, width=10,
                      anchor="center").pack(side="left")
 
-            # Mot actuel
             tk.Label(row, text=mot, font=FONT_BODY,
                      bg=row_bg, fg=FG_PRIMARY, width=20,
                      anchor="center").pack(side="left")
 
-            # Champ édition
             var = tk.StringVar(value=mot)
-            self._edit_entries[nombre] = var
+            self._edit_entries[idx] = var
             entry = tk.Entry(
                 row, textvariable=var, font=FONT_BODY,
                 bg=BG_INPUT, fg=FG_PRIMARY, insertbackground=FG_PRIMARY,
@@ -2721,7 +3092,6 @@ class QuizApp(tk.Tk):
             )
             entry.pack(side="left", padx=5, ipady=3)
 
-            # Bouton sauvegarder cette ligne (Label pour macOS)
             save_btn = tk.Label(
                 row, text="💾", font=FONT_BODY,
                 bg=BTN_BG, fg=FG_GREEN, relief="flat",
@@ -2729,12 +3099,26 @@ class QuizApp(tk.Tk):
             )
             save_btn.bind(
                 "<Button-1>",
-                lambda e, n=nombre, v=var, r=row: self._save_one_entry(
-                    n, v, r),
+                lambda e, i=idx, v=var, r=row, rb=row_bg: self._save_one_entry(
+                    i, v, r, rb,
+                ),
             )
             save_btn.bind("<Enter>", lambda e, b=save_btn: b.configure(bg=BTN_HOVER))
             save_btn.bind("<Leave>", lambda e, b=save_btn: b.configure(bg=BTN_BG))
-            save_btn.pack(side="left", padx=5)
+            save_btn.pack(side="left", padx=4)
+
+            del_btn = tk.Label(
+                row, text="🗑", font=FONT_BODY,
+                bg=BTN_BG, fg=FG_RED, relief="flat",
+                cursor="hand2", width=3, anchor="center", pady=3,
+            )
+            del_btn.bind(
+                "<Button-1>",
+                lambda e, i=idx: self._delete_table_row_at(i),
+            )
+            del_btn.bind("<Enter>", lambda e, b=del_btn: b.configure(bg=BTN_HOVER))
+            del_btn.bind("<Leave>", lambda e, b=del_btn: b.configure(bg=BTN_BG))
+            del_btn.pack(side="left", padx=2)
 
         # Bottom buttons
         btn_frame = tk.Frame(self.container, bg=BG_DARK)
@@ -2762,26 +3146,63 @@ class QuizApp(tk.Tk):
         self.manual_weak.discard(old_key)
         self.manual_weak = save_manual_weak_set(self.manual_weak, self.table)
 
-    def _save_one_entry(self, nombre, var, row_frame):
-        """Sauvegarde un seul mot modifié."""
+    def _add_new_table_row(self, n_entry, m_entry):
+        """Ajoute une paire (nombre unique) et retrie la table."""
+        n = n_entry.get().strip()
+        m = m_entry.get().strip()
+        if not n or not m:
+            messagebox.showwarning(
+                "Table", "Renseigne le nombre et le mot.",
+            )
+            return
+        if any(p[0] == n for p in self.table):
+            messagebox.showwarning(
+                "Table", f"Le nombre « {n} » existe déjà dans la table.",
+            )
+            return
+        self.table.append((n, m))
+        self.stats[(n, m)] = _default_stats_row()
+        self.table = _sort_table_pairs(self.table)
+        n_entry.delete(0, "end")
+        m_entry.delete(0, "end")
+        self._persist_table()
+        self._show_edit_table()
+
+    def _delete_table_row_at(self, idx):
+        """Supprime une ligne après confirmation."""
+        if idx < 0 or idx >= len(self.table):
+            return
+        nombre, mot = self.table[idx]
+        if not messagebox.askyesno(
+            "Supprimer",
+            f"Retirer la paire {nombre} → {mot} ?\n"
+            "Les stats de cette paire seront effacées.",
+        ):
+            return
+        pair = self.table.pop(idx)
+        self.stats.pop(pair, None)
+        self.manual_weak.discard(pair)
+        self.manual_weak = save_manual_weak_set(self.manual_weak, self.table)
+        self._persist_table()
+        self._show_edit_table()
+
+    def _save_one_entry(self, idx, var, row_frame, row_bg_normal):
+        """Sauvegarde un seul mot modifié (ligne idx)."""
+        if idx < 0 or idx >= len(self.table):
+            return
         new_mot = var.get().strip()
         if not new_mot:
             return
 
-        # Trouver l'ancienne paire et mettre à jour
-        for idx, (n, m) in enumerate(self.table):
-            if n == nombre:
-                old_mot = m
-                if new_mot != old_mot:
-                    # Mettre à jour la table
-                    self.table[idx] = (nombre, new_mot)
-                    self._reset_stats_on_mot_change(nombre, old_mot, new_mot)
-
-                    # Flash vert pour confirmer
-                    row_frame.configure(bg=FG_GREEN)
-                    self.after(400, lambda rf=row_frame: rf.configure(
-                        bg=BG_CARD))
-                break
+        nombre, old_mot = self.table[idx]
+        if new_mot != old_mot:
+            self.table[idx] = (nombre, new_mot)
+            self._reset_stats_on_mot_change(nombre, old_mot, new_mot)
+            row_frame.configure(bg=FG_GREEN)
+            self.after(
+                400,
+                lambda rf=row_frame, rb=row_bg_normal: rf.configure(bg=rb),
+            )
 
         self._persist_table()
 
@@ -2789,7 +3210,7 @@ class QuizApp(tk.Tk):
         """Sauvegarde toutes les modifications de la table."""
         changes = 0
         for idx, (nombre, old_mot) in enumerate(list(self.table)):
-            var = self._edit_entries.get(nombre)
+            var = self._edit_entries.get(idx)
             if var:
                 new_mot = var.get().strip()
                 if new_mot and new_mot != old_mot:
@@ -2797,6 +3218,7 @@ class QuizApp(tk.Tk):
                     self._reset_stats_on_mot_change(nombre, old_mot, new_mot)
                     changes += 1
 
+        self.table = _sort_table_pairs(self.table)
         self._persist_table()
         save_stats(self.stats)
 
@@ -2871,6 +3293,7 @@ class QuizApp(tk.Tk):
         ):
             return
         merged = {}
+        new_table = _sort_table_pairs(list(new_table))
         for n, m in new_table:
             key = (n, m)
             merged[key] = list(self.stats.get(key, _default_stats_row()))
