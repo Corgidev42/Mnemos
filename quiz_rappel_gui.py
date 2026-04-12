@@ -64,7 +64,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.6.6"
+VERSION = "1.6.7"
 # Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -895,62 +895,6 @@ def load_table():
     return list(TABLE_EMBEDDED)
 
 
-def parse_imported_table_file(path):
-    """
-    Lit un fichier JSON ou CSV et retourne une liste de (nombre, mot).
-    JSON : [["0","bulle"], ...] ou [{"nombre":"0","mot":"bulle"}, ...]
-    CSV : colonnes Nombre,Mot (en-tête optionnel).
-    """
-    ext = os.path.splitext(path)[1].lower()
-    if ext == ".csv":
-        with open(path, encoding="utf-8", errors="replace") as f:
-            reader = csv.reader(f)
-            rows = list(reader)
-        if not rows:
-            raise ValueError("Fichier vide.")
-        first = [c.strip().lower() for c in rows[0][:2]]
-        if first and first[0] in ("nombre", "number", "#", "n"):
-            rows = rows[1:]
-        out = []
-        for row in rows:
-            if len(row) >= 2:
-                n, m = row[0].strip(), row[1].strip()
-                if n and m:
-                    out.append((n, m))
-        if not out:
-            raise ValueError("Aucune ligne valide (attendu : Nombre,Mot).")
-        return out
-
-    with open(path, encoding="utf-8", errors="replace") as f:
-        data = json.load(f)
-    if not isinstance(data, list):
-        raise ValueError("JSON invalide : une liste est attendue.")
-    out = []
-    for item in data:
-        if isinstance(item, (list, tuple)) and len(item) >= 2:
-            n, m = str(item[0]).strip(), str(item[1]).strip()
-            if n and m:
-                out.append((n, m))
-        elif isinstance(item, dict):
-            n = str(
-                item.get("nombre")
-                or item.get("Nombre")
-                or item.get("n")
-                or ""
-            ).strip()
-            m = str(
-                item.get("mot")
-                or item.get("Mot")
-                or item.get("m")
-                or ""
-            ).strip()
-            if n and m:
-                out.append((n, m))
-    if not out:
-        raise ValueError("Aucune paire nombre / mot reconnue dans le JSON.")
-    return out
-
-
 STATS_KEY_SEP = "\x01"
 
 # Stats par paire : [score N→M, score M→N, temps moyen s/lettre (mot), temps moyen s/chiffre (nombre)]
@@ -977,6 +921,144 @@ def _norm_pair(pair):
     """Clé logique (nombre, mot) pour fusionner fichier ↔ table (ex. 82 vs \"82\")."""
     n, m = pair[0], pair[1]
     return (str(n).strip(), str(m).strip())
+
+
+TABLE_EXPORT_VERSION = 2
+
+
+def _pairs_from_json_rows(items):
+    """Construit une liste de (nombre, mot) depuis une liste JSON (table)."""
+    if not isinstance(items, list):
+        raise ValueError("La clé « table » doit être une liste de paires.")
+    out = []
+    for item in items:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            n, m = str(item[0]).strip(), str(item[1]).strip()
+            if n and m:
+                out.append((n, m))
+        elif isinstance(item, dict):
+            n = str(
+                item.get("nombre")
+                or item.get("Nombre")
+                or item.get("n")
+                or ""
+            ).strip()
+            m = str(
+                item.get("mot")
+                or item.get("Mot")
+                or item.get("m")
+                or ""
+            ).strip()
+            if n and m:
+                out.append((n, m))
+    if not out:
+        raise ValueError("Aucune paire nombre / mot reconnue.")
+    return out
+
+
+def _norm_map_from_stats_json_obj(raw_stats):
+    """Convertit l’objet stats du fichier d’export en carte _norm_pair → ligne stats."""
+    if not isinstance(raw_stats, dict) or not raw_stats:
+        return None
+    m = {}
+    for sk, sv in raw_stats.items():
+        if not isinstance(sk, str) or STATS_KEY_SEP not in sk:
+            continue
+        parts = sk.split(STATS_KEY_SEP, 1)
+        if len(parts) != 2:
+            continue
+        if not isinstance(sv, (list, tuple)) or len(sv) < 3:
+            continue
+        m[_norm_pair(parts)] = _normalize_stats_vals(sv)
+    return m or None
+
+
+def parse_imported_table_file(path):
+    """
+    Lit JSON ou CSV. Retourne (table, stats_norm_map).
+
+    stats_norm_map : dict {_norm_pair → [4 valeurs]} si le fichier inclut des stats,
+    sinon None (fusion avec les stats actuelles à l’import).
+
+    JSON : liste legacy [["n","m"],…], ou export v2 { mnemos_export_version, table, stats }.
+    CSV : Nombre,Mot ou avec colonnes N→M, M→N, s/lettre, s/chiffre.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".csv":
+        with open(path, encoding="utf-8", errors="replace") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+        if not rows:
+            raise ValueError("Fichier vide.")
+        first = [c.strip().lower() for c in rows[0][:2]]
+        if first and first[0] in ("nombre", "number", "#", "n"):
+            rows = rows[1:]
+        out = []
+        norm_stats = {}
+        for row in rows:
+            if len(row) < 2:
+                continue
+            n, m = row[0].strip(), row[1].strip()
+            if not n or not m:
+                continue
+            out.append((n, m))
+            if len(row) >= 6:
+                try:
+                    s_nm = int(float(row[2].strip()))
+                    s_mn = int(float(row[3].strip()))
+                    t_nm = float(row[4].strip() or 0)
+                    t_mn = float(row[5].strip() or 0)
+                    norm_stats[_norm_pair((n, m))] = [s_nm, s_mn, t_nm, t_mn]
+                except (ValueError, TypeError, IndexError):
+                    pass
+        if not out:
+            raise ValueError("Aucune ligne valide (attendu : Nombre,Mot).")
+        return out, (norm_stats if norm_stats else None)
+
+    with open(path, encoding="utf-8", errors="replace") as f:
+        data = json.load(f)
+
+    if isinstance(data, dict) and int(data.get("mnemos_export_version", 0)) >= 2:
+        rows = data.get("table")
+        if not isinstance(rows, list):
+            raise ValueError("Export v2 : champ « table » (liste) attendu.")
+        table = _pairs_from_json_rows(rows)
+        st = data.get("stats")
+        if st is None:
+            norm_map = None
+        elif isinstance(st, dict) and len(st) == 0:
+            norm_map = {}
+        else:
+            norm_map = _norm_map_from_stats_json_obj(st)
+        return table, norm_map
+
+    if isinstance(data, list):
+        return _pairs_from_json_rows(data), None
+
+    raise ValueError(
+        "JSON non reconnu : utilise une liste de paires ou un export Mnemos "
+        f"(mnemos_export_version ≥ {TABLE_EXPORT_VERSION}).",
+    )
+
+
+def merged_stats_for_imported_table(new_table, norm_stats_map, previous_stats):
+    """
+    Construit self.stats après import. Si norm_stats_map est fourni, uniquement
+    ces valeurs (complétées par défaut pour les paires sans entrée).
+    Sinon fusion par _norm_pair avec previous_stats.
+    """
+    if norm_stats_map is not None:
+        out = {}
+        for pair in new_table:
+            row = norm_stats_map.get(_norm_pair(pair))
+            out[pair] = list(row) if row is not None else _default_stats_row()
+        return out
+    by_norm = {_norm_pair(k): list(v) for k, v in previous_stats.items()}
+    out = {}
+    for pair in new_table:
+        row = by_norm.get(_norm_pair(pair))
+        out[pair] = list(row) if row is not None else _default_stats_row()
+    return out
 
 
 def load_stats(table):
@@ -1061,7 +1143,9 @@ class QuizApp(tk.Tk):
         self.question_start_time = 0
         self.results = []  # (mode, nombre, mot, user_answer, correct, time)
         self._auto_advance_id = None
-        self._stats_sort_tab = "worst"  # persistent stats sort state
+        self._stats_sort_tab = "worst"  # onglets « moins / plus connus » (colonne total)
+        self._stats_sort_column = "total"  # total|idx|nombre|mot|s_nm|s_mn|t_nm|t_mn
+        self._stats_sort_desc = False  # False = scores croissants (faibles d’abord)
 
         # Container principal
         self.container = tk.Frame(self, bg=BG_DARK)
@@ -1743,17 +1827,26 @@ class QuizApp(tk.Tk):
         card = self.make_card(self.container)
         card.pack(padx=80, fill="x")
 
+        n_blocs = _bloc_count_for_table(self.table)
+        last_start = (n_blocs - 1) * 10
         tk.Label(
             card,
-            text="Sélectionne les blocs à réviser (tranches de 10, selon ta table) :",
+            text=(
+                "Sélectionne les blocs à réviser (tranches de 10 nombres : 0–9, 10–19, …). "
+                f"Ta table génère {n_blocs} bloc(s), jusqu’à "
+                f"{last_start}–{last_start + 9}."
+            ),
             font=FONT_BODY, bg=BG_CARD, fg=FG_SECONDARY, wraplength=600,
         ).pack(pady=(5, 8))
-
-        n_blocs = _bloc_count_for_table(self.table)
-        scroll_wrap = tk.Frame(card, bg=BG_CARD, height=168)
+        rows_g = max(1, (n_blocs + 3) // 4)
+        scroll_h = min(440, max(168, 20 + rows_g * 36))
+        scroll_wrap = tk.Frame(card, bg=BG_CARD, height=scroll_h)
         scroll_wrap.pack(fill="x", pady=4)
         scroll_wrap.pack_propagate(False)
-        b_canvas = tk.Canvas(scroll_wrap, bg=BG_CARD, highlightthickness=0, height=160)
+        b_canvas = tk.Canvas(
+            scroll_wrap, bg=BG_CARD, highlightthickness=0,
+            height=max(140, scroll_h - 8),
+        )
         b_sb = ttk.Scrollbar(scroll_wrap, orient="vertical", command=b_canvas.yview)
         blocs_frame = tk.Frame(b_canvas, bg=BG_CARD)
         blocs_frame.bind(
@@ -1801,12 +1894,14 @@ class QuizApp(tk.Tk):
         row_a = tk.Frame(tens_frame, bg=BG_CARD)
         row_a.pack(fill="x")
         self.make_button(
-            row_a, "50 diz. paires (0,20…80)", self._select_even_tens_blocs,
-            width=22,
+            row_a, "Dizaines « paires » (0–9, 20–29, …)",
+            self._select_even_tens_blocs,
+            width=28,
         ).pack(side="left", padx=4, pady=2)
         self.make_button(
-            row_a, "50 diz. impaires (10…90)", self._select_odd_tens_blocs,
-            width=22,
+            row_a, "Dizaines « impaires » (10–19, …)",
+            self._select_odd_tens_blocs,
+            width=28,
         ).pack(side="left", padx=4, pady=2)
         row_b = tk.Frame(tens_frame, bg=BG_CARD)
         row_b.pack(fill="x")
@@ -1840,14 +1935,14 @@ class QuizApp(tk.Tk):
             v.set(False)
 
     def _select_even_tens_blocs(self):
-        """Blocs 0–9, 20–29, … 80–89 (dizaines paires)."""
+        """Toutes les tranches 0–9, 20–29, … dont l’indice de dizaine est pair."""
         for i, v in self.bloc_vars.items():
-            v.set(i in (0, 2, 4, 6, 8))
+            v.set(i % 2 == 0)
 
     def _select_odd_tens_blocs(self):
-        """Blocs 10–19, … 90–99 (dizaines impaires)."""
+        """Toutes les tranches 10–19, 30–39, … dont l’indice de dizaine est impair."""
         for i, v in self.bloc_vars.items():
-            v.set(i in (1, 3, 5, 7, 9))
+            v.set(i % 2 == 1)
 
     def _start_quiz_even_numbers(self):
         pairs = []
@@ -2541,10 +2636,15 @@ class QuizApp(tk.Tk):
         ).pack(anchor="w", pady=(5, 8))
 
         n_blocs_fc = _bloc_count_for_table(self.table)
-        fc_scroll = tk.Frame(card, bg=BG_CARD, height=168)
+        rows_fc = max(1, (n_blocs_fc + 3) // 4)
+        fc_scroll_h = min(440, max(168, 20 + rows_fc * 36))
+        fc_scroll = tk.Frame(card, bg=BG_CARD, height=fc_scroll_h)
         fc_scroll.pack(fill="x", pady=4)
         fc_scroll.pack_propagate(False)
-        fc_canvas = tk.Canvas(fc_scroll, bg=BG_CARD, highlightthickness=0, height=160)
+        fc_canvas = tk.Canvas(
+            fc_scroll, bg=BG_CARD, highlightthickness=0,
+            height=max(140, fc_scroll_h - 8),
+        )
         fc_sb = ttk.Scrollbar(fc_scroll, orient="vertical", command=fc_canvas.yview)
         blocs_frame = tk.Frame(fc_canvas, bg=BG_CARD)
         blocs_frame.bind(
@@ -2914,15 +3014,20 @@ class QuizApp(tk.Tk):
         tk.Label(
             self.container,
             text="Temps moyen (s) : par lettre du mot (N→M) et par chiffre du "
-                 "nombre (M→N), mis à jour sur les bonnes réponses.",
+                 "nombre (M→N). Colonne # = position dans la table de rappel. "
+                 "Clique sur un en-tête pour trier ; un second clic inverse.",
             font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY, wraplength=720,
         ).pack(pady=(0, 8))
 
-        # Tabs — use persistent sort state
+        # Tabs + actions
         tab_frame = tk.Frame(self.container, bg=BG_DARK)
         tab_frame.pack(fill="x", padx=40, pady=(0, 5))
 
-        current_tab = self._stats_sort_tab
+        current_tab = (
+            self._stats_sort_tab
+            if self._stats_sort_column == "total"
+            else None
+        )
 
         def make_tab(text, val):
             is_active = current_tab == val
@@ -2935,7 +3040,6 @@ class QuizApp(tk.Tk):
             )
             btn.pack(side="left", padx=(0, 2))
             if is_active:
-                # Bright underline for active tab
                 underline = tk.Frame(tab_frame, bg=FG_ACCENT, height=3)
                 underline.pack(side="left", fill="x", padx=(0, 2))
             btn.bind("<Button-1>", lambda e: self._switch_stats_tab(val))
@@ -2946,22 +3050,29 @@ class QuizApp(tk.Tk):
         make_tab("🔻 Moins connus", "worst")
         make_tab("🔺 Plus connus", "best")
         tk.Label(
-            tab_frame, text=            "(Les éléments révisés apparaissent dans Plus connus)",
+            tab_frame,
+            text="(Onglets = tri par score total · autres colonnes = tri libre)",
             font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
         ).pack(side="left", padx=(12, 0))
 
-        # Bouton reset
         reset_btn = tk.Label(
-            tab_frame, text="🗑 Réinitialiser", font=FONT_SMALL,
+            tab_frame, text="🗑 Tout à zéro", font=FONT_SMALL,
             bg=BG_DARK, fg=FG_RED, cursor="hand2", padx=10,
         )
         reset_btn.pack(side="right")
         reset_btn.bind("<Button-1>", lambda e: self._confirm_reset_stats())
 
+        sync_btn = tk.Label(
+            tab_frame, text="↻ Sync table", font=FONT_SMALL,
+            bg=BG_DARK, fg=FG_ACCENT, cursor="hand2", padx=10,
+        )
+        sync_btn.pack(side="right", padx=(0, 4))
+        sync_btn.bind("<Button-1>", lambda e: self._sync_stats_to_table())
+
         # Liste
         self.stats_list_frame = tk.Frame(self.container, bg=BG_DARK)
         self.stats_list_frame.pack(fill="both", expand=True, padx=40, pady=5)
-        self._render_stats_list(current_tab)
+        self._render_stats_list()
 
         self.make_button(
             self.container, "⬅  Retour au menu", self.show_main_menu,
@@ -2977,17 +3088,88 @@ class QuizApp(tk.Tk):
             save_stats(self.stats, self.table)
             self.show_stats_view()
 
-    def _switch_stats_tab(self, tab):
-        self._stats_sort_tab = tab
+    def _sync_stats_to_table(self):
+        """Supprime toute entrée de stats qui ne correspond plus à un couple de la table."""
+        valid_bn = {_norm_pair(p) for p in self.table}
+        removed = 0
+        for k in list(self.stats.keys()):
+            if _norm_pair(k) not in valid_bn:
+                del self.stats[k]
+                removed += 1
+        save_stats(self.stats, self.table)
+        messagebox.showinfo(
+            "Synchroniser",
+            f"{removed} entrée(s) hors table supprimée(s)."
+            if removed
+            else "Déjà aligné : aucune entrée hors table.",
+        )
         self.show_stats_view()
 
-    def _render_stats_list(self, mode):
+    def _clear_stats_one_pair(self, pair):
+        n, m = pair
+        if not messagebox.askyesno(
+            "Effacer les stats",
+            f"Remettre à zéro les statistiques pour {n} → {m} ?",
+        ):
+            return
+        self.stats[pair] = _default_stats_row()
+        save_stats(self.stats, self.table)
+        self.show_stats_view()
+
+    def _switch_stats_tab(self, tab):
+        self._stats_sort_tab = tab
+        self._stats_sort_column = "total"
+        self._stats_sort_desc = tab == "best"
+        self.show_stats_view()
+
+    def _stats_header_clicked(self, col):
+        if self._stats_sort_column == col:
+            self._stats_sort_desc = not self._stats_sort_desc
+        else:
+            self._stats_sort_column = col
+            self._stats_sort_desc = False
+        if self._stats_sort_column == "total":
+            self._stats_sort_tab = "best" if self._stats_sort_desc else "worst"
+        self.show_stats_view()
+
+    def _stats_sort_key(self, item, table_index_map):
+        """Clé de tri (tuple) pour une ligne (pair, vals)."""
+        (n, m), vals = item
+        s_nm, s_mn, t_nm, t_mn = vals
+        col = self._stats_sort_column
+        tie_n, tie_m = str(n), str(m).lower()
+        if col == "total":
+            return (s_nm + s_mn, tie_n, tie_m)
+        if col == "idx":
+            return (table_index_map.get((n, m), 10**9), tie_n, tie_m)
+        if col == "nombre":
+            v = _parse_nombre_int(n)
+            if v is not None:
+                return (0, v, tie_n, tie_m)
+            return (1, tie_n, tie_m)
+        if col == "mot":
+            return (tie_m, tie_n)
+        if col == "s_nm":
+            return (s_nm, tie_n, tie_m)
+        if col == "s_mn":
+            return (s_mn, tie_n, tie_m)
+        if col == "t_nm":
+            return (t_nm, tie_n, tie_m)
+        if col == "t_mn":
+            return (t_mn, tie_n, tie_m)
+        return (0, tie_n, tie_m)
+
+    def _render_stats_list(self):
         for w in self.stats_list_frame.winfo_children():
             w.destroy()
 
-        reverse = mode == "best"
-        tri = sorted(self.stats.items(),
-                     key=lambda x: x[1][0] + x[1][1], reverse=reverse)
+        table_index_map = {p: i for i, p in enumerate(self.table)}
+        items = list(self.stats.items())
+        tri = sorted(
+            items,
+            key=lambda it: self._stats_sort_key(it, table_index_map),
+            reverse=self._stats_sort_desc,
+        )
 
         canvas = tk.Canvas(self.stats_list_frame, bg=BG_DARK,
                            highlightthickness=0)
@@ -3006,14 +3188,31 @@ class QuizApp(tk.Tk):
         scrollbar.pack(side="right", fill="y")
         self._bind_mousewheel(canvas)
 
-        # Header
+        def add_sort_hdr(parent, col_id, title, width):
+            if self._stats_sort_column == col_id:
+                title = f"{title} {'▼' if self._stats_sort_desc else '▲'}"
+            lab = tk.Label(
+                parent, text=title, font=FONT_SMALL, bg=BTN_BG,
+                fg=FG_ACCENT if self._stats_sort_column == col_id else FG_SECONDARY,
+                width=width, anchor="center", cursor="hand2",
+            )
+            lab.pack(side="left")
+            lab.bind("<Button-1>", lambda e, c=col_id: self._stats_header_clicked(c))
+
         hdr = tk.Frame(inner, bg=BTN_BG, pady=5)
         hdr.pack(fill="x", pady=(0, 2))
-        for text, w in [("#", 4), ("Nombre", 7), ("Mot", 14),
-                        ("N→M", 5), ("M→N", 5), ("s/lettre", 9), ("s/ch.", 8)]:
-            tk.Label(hdr, text=text, font=FONT_SMALL, bg=BTN_BG,
-                     fg=FG_SECONDARY, width=w, anchor="center").pack(
-                side="left")
+        add_sort_hdr(hdr, "idx", "#", 4)
+        add_sort_hdr(hdr, "total", "Tot.", 4)
+        add_sort_hdr(hdr, "nombre", "Nombre", 7)
+        add_sort_hdr(hdr, "mot", "Mot", 12)
+        add_sort_hdr(hdr, "s_nm", "N→M", 5)
+        add_sort_hdr(hdr, "s_mn", "M→N", 5)
+        add_sort_hdr(hdr, "t_nm", "s/lettre", 9)
+        add_sort_hdr(hdr, "t_mn", "s/ch.", 8)
+        tk.Label(
+            hdr, text=" ", font=FONT_SMALL, bg=BTN_BG,
+            fg=FG_SECONDARY, width=4, anchor="center",
+        ).pack(side="left")
 
         for i, ((nombre, mot), vals) in enumerate(tri):
             s_nm, s_mn, t_nm, t_mn = vals
@@ -3028,14 +3227,19 @@ class QuizApp(tk.Tk):
             row = tk.Frame(inner, bg=row_bg, pady=3)
             row.pack(fill="x", pady=1)
 
-            tk.Label(row, text=str(i + 1), font=FONT_SMALL,
+            rank = table_index_map.get((nombre, mot), -1)
+            idx_txt = str(rank + 1) if rank >= 0 else "—"
+            tk.Label(row, text=idx_txt, font=FONT_SMALL,
                      bg=row_bg, fg=FG_SECONDARY, width=4,
+                     anchor="center").pack(side="left")
+            tk.Label(row, text=str(total_score), font=FONT_SMALL,
+                     bg=row_bg, fg=FG_PRIMARY, width=4,
                      anchor="center").pack(side="left")
             tk.Label(row, text=nombre, font=FONT_BODY_BOLD,
                      bg=row_bg, fg=FG_ACCENT, width=7,
                      anchor="center").pack(side="left")
             tk.Label(row, text=mot, font=FONT_BODY,
-                     bg=row_bg, fg=FG_PRIMARY, width=14,
+                     bg=row_bg, fg=FG_PRIMARY, width=12,
                      anchor="w").pack(side="left")
 
             nm_color = (FG_GREEN if s_nm > 0
@@ -3058,6 +3262,17 @@ class QuizApp(tk.Tk):
             tk.Label(row, text=tmn, font=FONT_SMALL,
                      bg=row_bg, fg=FG_SECONDARY, width=8,
                      anchor="center").pack(side="left")
+
+            del_lbl = tk.Label(
+                row, text="✕", font=FONT_SMALL,
+                bg=row_bg, fg=FG_RED, width=4, anchor="center",
+                cursor="hand2",
+            )
+            del_lbl.pack(side="left")
+            del_lbl.bind(
+                "<Button-1>",
+                lambda e, p=(nombre, mot): self._clear_stats_one_pair(p),
+            )
 
     # --------------------------------------------------------
     # Écran : Parcourir la table
@@ -3444,7 +3659,7 @@ class QuizApp(tk.Tk):
             messagebox.showinfo("Rien à faire", "Aucune modification détectée.")
 
     def _export_table_file(self):
-        """Exporte la table en JSON ou CSV."""
+        """Exporte la table + stats (JSON v2) ou table + stats en colonnes (CSV)."""
         path = filedialog.asksaveasfilename(
             parent=self,
             title="Exporter la table",
@@ -3460,26 +3675,37 @@ class QuizApp(tk.Tk):
             if path.lower().endswith(".csv"):
                 with open(path, "w", encoding="utf-8", newline="") as f:
                     w = csv.writer(f)
-                    w.writerow(["Nombre", "Mot"])
-                    for n, m in self.table:
-                        w.writerow([n, m])
-            else:
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(
-                        [[n, m] for n, m in self.table],
-                        f,
-                        ensure_ascii=False,
-                        indent=2,
+                    w.writerow(
+                        ["Nombre", "Mot", "N→M", "M→N", "s/lettre", "s/chiffre"],
                     )
+                    for n, m in self.table:
+                        v = self.stats.get((n, m), _default_stats_row())
+                        w.writerow([n, m, v[0], v[1], v[2], v[3]])
+            else:
+                payload = {
+                    "mnemos_export_version": TABLE_EXPORT_VERSION,
+                    "app": APP_NAME,
+                    "app_version": VERSION,
+                    "table": [[n, m] for n, m in self.table],
+                    "stats": {
+                        _stats_key(n, m): [
+                            int(v[0]), int(v[1]),
+                            float(v[2]), float(v[3]),
+                        ]
+                        for (n, m), v in self.stats.items()
+                    },
+                }
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
             messagebox.showinfo(
                 "Export réussi",
-                f"{len(self.table)} paires enregistrées dans :\n{path}",
+                f"{len(self.table)} paires et leurs stats enregistrées dans :\n{path}",
             )
         except OSError as e:
             messagebox.showerror("Export", str(e))
 
     def _import_table_file(self):
-        """Importe une table depuis JSON ou CSV."""
+        """Importe une table depuis JSON ou CSV (stats optionnelles dans le fichier)."""
         path = filedialog.askopenfilename(
             parent=self,
             title="Importer une table",
@@ -3492,26 +3718,33 @@ class QuizApp(tk.Tk):
         if not path:
             return
         try:
-            new_table = parse_imported_table_file(path)
+            new_table, norm_stats_map = parse_imported_table_file(path)
         except (OSError, json.JSONDecodeError, ValueError) as e:
             messagebox.showerror("Import", str(e))
             return
-        if not messagebox.askyesno(
-            "Importer la table",
-            f"Remplacer la table actuelle ({len(self.table)} paires) par "
-            f"{len(new_table)} paires importées ?\n\n"
-            "Les statistiques des paires absentes du nouveau fichier seront "
-            "supprimées. Les paires identiques (même nombre et même mot) "
-            "conservent leurs stats.",
-        ):
-            return
-        by_norm = {_norm_pair(k): list(v) for k, v in self.stats.items()}
-        merged = {}
         new_table = _sort_table_pairs(list(new_table))
-        for n, m in new_table:
-            key = (n, m)
-            row = by_norm.get(_norm_pair(key))
-            merged[key] = list(row) if row is not None else _default_stats_row()
+        if norm_stats_map is not None:
+            msg = (
+                f"Remplacer la table actuelle ({len(self.table)} paires) par "
+                f"{len(new_table)} paires importées ?\n\n"
+                "⚠️ Ce fichier contient des statistiques : elles remplaceront "
+                "les stats en mémoire pour les paires importées (les paires sans "
+                "entrée dans le fichier repartent à zéro).\n\n"
+                "Les paires absentes du fichier disparaissent de la table."
+            )
+        else:
+            msg = (
+                f"Remplacer la table actuelle ({len(self.table)} paires) par "
+                f"{len(new_table)} paires importées ?\n\n"
+                "Aucune stat dans le fichier : les stats des paires identiques "
+                "(même nombre et même mot) sont conservées ; le reste est "
+                "réinitialisé."
+            )
+        if not messagebox.askyesno("Importer la table", msg):
+            return
+        merged = merged_stats_for_imported_table(
+            new_table, norm_stats_map, self.stats,
+        )
         self.table = new_table
         self.stats = merged
         self.manual_weak = save_manual_weak_set(
