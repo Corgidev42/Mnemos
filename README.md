@@ -32,7 +32,7 @@
 - 🎯 **Points faibles manuels** : coches dans « Parcourir la table », repris dans le mode Focus
 - 📖 **Vue table** avec recherche et code couleur
 - 📤 **Export / import** de la table (JSON ou CSV) depuis le menu ou l’écran « Parcourir la table »
-- 🔄 **Mise à jour automatique** — place l'app dans Applications pour l'activer
+- 🔄 **Mise à jour automatique** — place l’app dans Applications pour l’activer ; en cas de souci, journal `updater_last.log` dans `~/Library/Application Support/Mnemos/`
 
 ---
 

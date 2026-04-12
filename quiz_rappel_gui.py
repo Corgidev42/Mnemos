@@ -64,7 +64,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.6.3"
+VERSION = "1.6.4"
 # Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -733,37 +733,100 @@ def _install_update_self(invoke_on_main, zip_url, tag, callback):
 
             _ensure_macos_executables(extracted_app)
 
-            # Script qui attend notre fin, remplace, relance
-            # xattr -cr : retire quarantine/Gatekeeper qui bloque les apps téléchargées
+            # Journal lisible si la maj échoue après fermeture de l’app
+            log_path = os.path.join(_get_app_support_dir(), "updater_last.log")
+            try:
+                with open(log_path, "a", encoding="utf-8") as lg:
+                    lg.write(
+                        f"\n--- Préparation mise à jour {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n"
+                        f"  app actuelle : {app_path}\n"
+                        f"  bundle extrait : {extracted_app}\n",
+                    )
+            except OSError:
+                log_path = os.path.join(cache_dir, "updater.log")
+
+            # Copie d’abord dans le cache, puis swap : évite de supprimer l’app si ditto échoue
+            tmp_bundle = os.path.join(cache_dir, f"{APP_NAME}_ready.app")
             pid = os.getpid()
+            script_path = os.path.join(cache_dir, "mnemos_apply_update.sh")
             script = f'''#!/bin/bash
-set -e
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+LOG={repr(log_path)}
 APP_PATH={repr(app_path)}
 NEW_APP={repr(extracted_app)}
 CACHE_DIR={repr(cache_dir)}
+TMP_BUNDLE={repr(tmp_bundle)}
 PID={pid}
-while kill -0 $PID 2>/dev/null; do sleep 0.3; done
-sleep 1
-if [ -d "$NEW_APP" ]; then
-  xattr -cr "$NEW_APP" 2>/dev/null || true
-  rm -rf "$APP_PATH"
-  ditto "$NEW_APP" "$APP_PATH" 2>/dev/null || cp -R "$NEW_APP" "$APP_PATH"
-  xattr -cr "$APP_PATH" 2>/dev/null || true
-  for f in "$APP_PATH/Contents/MacOS/"*; do
-    [ -f "$f" ] && chmod +x "$f" 2>/dev/null || true
-  done
-  open "$APP_PATH"
+exec >>"$LOG" 2>&1
+echo ""
+echo "======== Mnemos updater $(date) ========"
+echo "En attente fin du processus PID=$PID …"
+for _ in $(seq 1 600); do
+  if ! kill -0 "$PID" 2>/dev/null; then
+    break
+  fi
+  sleep 0.25
+done
+echo "Processus terminé, pause fichiers…"
+sleep 2
+if [[ ! -d "$NEW_APP" ]]; then
+  echo "ERREUR: bundle extrait introuvable: $NEW_APP"
+  rm -rf "$CACHE_DIR"
+  exit 1
 fi
+/usr/bin/xattr -cr "$NEW_APP" 2>/dev/null || true
+rm -rf "$TMP_BUNDLE"
+echo "ditto -> TMP_BUNDLE …"
+if ! /usr/bin/ditto "$NEW_APP" "$TMP_BUNDLE"; then
+  echo "ERREUR: ditto vers TMP_BUNDLE a échoué"
+  exit 1
+fi
+echo "Suppression ancienne app …"
+if ! rm -rf "$APP_PATH"; then
+  echo "ERREUR: rm -rf APP_PATH a échoué (droits ?)"
+  rm -rf "$TMP_BUNDLE"
+  exit 1
+fi
+echo "Installation …"
+if ! /bin/mv "$TMP_BUNDLE" "$APP_PATH"; then
+  echo "ERREUR: mv TMP_BUNDLE -> APP_PATH a échoué"
+  echo "Récupération possible: $TMP_BUNDLE ou dossier cache $CACHE_DIR"
+  exit 1
+fi
+/usr/bin/xattr -cr "$APP_PATH" 2>/dev/null || true
+if [[ -d "$APP_PATH/Contents/MacOS" ]]; then
+  for f in "$APP_PATH/Contents/MacOS/"*; do
+    [[ -f "$f" ]] && chmod +x "$f" 2>/dev/null || true
+  done
+fi
+echo "Ouverture …"
+/usr/bin/open "$APP_PATH" || echo "AVERTISSEMENT: open a échoué"
+echo "OK: mise à jour appliquée"
 rm -rf "$CACHE_DIR"
+echo "==== fin ===="
+exit 0
 '''
-            script_path = os.path.join(
-                tempfile.gettempdir(), f"{APP_NAME}_updater.sh")
-            with open(script_path, "w") as f:
+            with open(script_path, "w", encoding="utf-8") as f:
                 f.write(script)
             os.chmod(script_path, 0o755)
 
-            # Lancer le script en arrière-plan
-            subprocess.Popen(["bash", script_path], start_new_session=True)
+            try:
+                subprocess.Popen(
+                    ["/bin/bash", script_path],
+                    start_new_session=True,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    close_fds=True,
+                )
+            except OSError as exc:
+                invoke_on_main(
+                    lambda msg=str(exc): callback(
+                        False,
+                        f"Impossible de lancer le script de mise à jour : {msg}",
+                    ),
+                )
+                return
 
             invoke_on_main(lambda: callback(True, "restart"))
         except Exception as e:
@@ -1609,6 +1672,16 @@ class QuizApp(tk.Tk):
         """Appelé sur le thread Tk après téléchargement / install."""
         if success:
             if message == "restart":
+                support = _get_app_support_dir()
+                messagebox.showinfo(
+                    "Mise à jour",
+                    "La nouvelle version a été téléchargée. L’app va se fermer, "
+                    "puis le remplacement dans Applications et la réouverture se "
+                    "font en arrière-plan (quelques secondes).\n\n"
+                    "Si l’app ne revient pas, ouvre le fichier "
+                    "« updater_last.log » dans :\n"
+                    f"{support}",
+                )
                 self._on_quit()
             else:
                 messagebox.showinfo("Téléchargement terminé", message)
