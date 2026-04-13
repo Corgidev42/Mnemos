@@ -64,7 +64,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.6.7"
+VERSION = "1.6.8"
 # Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -2439,6 +2439,19 @@ class QuizApp(tk.Tk):
             font=FONT_BODY, bg=BG_CARD, fg=FG_SECONDARY,
         ).pack()
 
+        weak_var = tk.BooleanVar(value=(nombre, mot) in self.manual_weak)
+        tk.Checkbutton(
+            card,
+            text="🎯 Point faible (inclus au focus)",
+            variable=weak_var,
+            command=lambda p=(nombre, mot), v=weak_var: self._persist_weak_toggle(
+                p, v.get(),
+            ),
+            font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
+            selectcolor=CHECK_BG, activebackground=BG_CARD,
+            activeforeground=FG_ORANGE, highlightthickness=0,
+        ).pack(anchor="w", pady=(10, 0))
+
         # Progression
         idx = self.current_q + 1
         total = len(self.questions)
@@ -2907,6 +2920,19 @@ class QuizApp(tk.Tk):
             self.bind("r", lambda e: self._flashcard_self_rate(True))
             self.bind("f", lambda e: self._flashcard_self_rate(False))
             self.bind("<Return>", lambda e: self._flashcard_self_rate(True))
+
+            weak_var = tk.BooleanVar(value=(nombre, mot) in self.manual_weak)
+            tk.Checkbutton(
+                self.container,
+                text="🎯 Point faible (inclus au focus)",
+                variable=weak_var,
+                command=lambda p=(nombre, mot), v=weak_var: self._persist_weak_toggle(
+                    p, v.get(),
+                ),
+                font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
+                selectcolor=CHECK_BG, activebackground=BG_DARK,
+                activeforeground=FG_ORANGE, highlightthickness=0,
+            ).pack(pady=(10, 0))
 
             tk.Label(
                 self.container,
