@@ -4,7 +4,7 @@
 Mnemos — Quiz GUI (système majeur / mémoire des nombres)
 Interface pour apprendre et réviser les associations nombre ↔ image.
 Améliorations v2 :
-  - Mode Flashcard (blocs, sens, auto-évaluation)
+  - Option flashcards sur chaque mode (retourner la carte, auto-évaluation)
   - Raccourcis clavier (Échap, Entrée, chiffres)
   - Auto-avance après bonne réponse
   - Streak (série) de bonnes réponses
@@ -64,7 +64,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.6.8"
+VERSION = "1.6.9"
 # Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -554,6 +554,86 @@ def save_manual_weak_set(manual_weak, table):
         f.flush()
         os.fsync(f.fileno())
     return set(cleaned)
+
+
+FULL_TABLE_RUNS_VERSION = 1
+
+
+def _full_table_runs_path():
+    return os.path.join(_get_app_support_dir(), "full_table_runs.json")
+
+
+def _normalize_full_table_run(obj):
+    """Valide une entrée d’historique « toute la table »."""
+    if not isinstance(obj, dict):
+        return None
+    try:
+        at = str(obj.get("at", "")).strip()
+        duration_s = float(obj["duration_s"])
+        total_q = int(obj["total_q"])
+        score = int(obj["score"])
+        errors = int(obj["errors"])
+        sens = str(obj.get("sens", ""))
+        shuffle = bool(obj.get("shuffle", False))
+        flashcard = bool(obj.get("flashcard", False))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not at or total_q < 0 or score < 0 or errors < 0:
+        return None
+    return {
+        "at": at,
+        "duration_s": round(duration_s, 1),
+        "total_q": total_q,
+        "score": score,
+        "errors": errors,
+        "sens": sens,
+        "shuffle": shuffle,
+        "flashcard": flashcard,
+    }
+
+
+def load_full_table_runs():
+    """Historique des sessions « Toute la table » (quiz ou flashcards)."""
+    path = _full_table_runs_path()
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return []
+    raw = []
+    if isinstance(data, list):
+        raw = data
+    elif isinstance(data, dict):
+        if int(data.get("mnemos_full_table_runs_version", 0)) >= 1:
+            r = data.get("runs")
+            if isinstance(r, list):
+                raw = r
+    out = []
+    for item in raw:
+        row = _normalize_full_table_run(item)
+        if row:
+            out.append(row)
+    return out[-200:]
+
+
+def save_full_table_runs(runs):
+    """Écrit l’historique « toute la table »."""
+    path = _full_table_runs_path()
+    clean = []
+    for item in runs[-200:]:
+        row = _normalize_full_table_run(item)
+        if row:
+            clean.append(row)
+    payload = {
+        "mnemos_full_table_runs_version": FULL_TABLE_RUNS_VERSION,
+        "runs": clean,
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=0)
+        f.flush()
+        os.fsync(f.fileno())
 
 
 # ============================================================
@@ -1128,6 +1208,9 @@ class QuizApp(tk.Tk):
         self.stats = load_stats(self.table)
         self.preferences = load_preferences()
         self.manual_weak = load_manual_weak_set(self.table)
+        self.full_table_runs = load_full_table_runs()
+        self.session_flashcard_var = tk.BooleanVar(value=False)
+        self._full_table_meta = {}
 
         # Callbacks réseau / threads → exécution sur le thread Tk uniquement
         self._main_thread_queue = queue.Queue()
@@ -1208,6 +1291,182 @@ class QuizApp(tk.Tk):
         card = tk.Frame(parent, bg=BG_CARD, padx=padx, pady=pady,
                         highlightthickness=1, highlightbackground=BORDER_ACCENT, **kwargs)
         return card
+
+    def _add_flashcard_option(self, parent, *, bg=BG_CARD):
+        """Case à cocher : session en flashcards au lieu du quiz saisi."""
+        tk.Checkbutton(
+            parent,
+            text="  Mode flashcards (retourner la carte, auto-évaluation)",
+            variable=self.session_flashcard_var,
+            font=FONT_BODY_BOLD, bg=bg, fg=FG_PRIMARY,
+            selectcolor=CHECK_BG, activebackground=bg,
+            activeforeground=CHECK_ON, highlightthickness=0,
+            anchor="w",
+        ).pack(anchor="w", pady=(12, 4))
+
+    def _launch_flashcard_from_questions(self):
+        """Démarre une session flashcard à partir de self.questions déjà construite."""
+        self.fc_cards = list(self.questions)
+        self.fc_idx = 0
+        self.fc_revealed = False
+        self.fc_score = 0
+        self.fc_streak = 0
+        self.fc_best_streak = 0
+        self.fc_results = []
+        self.fc_quiz_start = time.time()
+        self._show_flashcard()
+
+    def _record_full_table_run(
+        self, total_q, score, errors_count, duration_s, flashcard,
+    ):
+        """Ajoute une ligne à l’historique des sessions « toute la table »."""
+        meta = getattr(self, "_full_table_meta", None) or {}
+        run = {
+            "at": datetime.datetime.now().replace(microsecond=0).isoformat(),
+            "duration_s": round(float(duration_s), 1),
+            "total_q": int(total_q),
+            "score": int(score),
+            "errors": int(errors_count),
+            "sens": str(meta.get("sens", "")),
+            "shuffle": bool(meta.get("shuffle", False)),
+            "flashcard": bool(flashcard),
+        }
+        self.full_table_runs.append(run)
+        self.full_table_runs = self.full_table_runs[-200:]
+        save_full_table_runs(self.full_table_runs)
+
+    @staticmethod
+    def _format_full_table_run_line(run):
+        """Une ligne lisible pour le panneau d’accueil."""
+        mois = (
+            "janv.", "févr.", "mars", "avr.", "mai", "juin",
+            "juil.", "août", "sept.", "oct.", "nov.", "déc.",
+        )
+        try:
+            dt = datetime.datetime.fromisoformat(str(run.get("at", "")))
+            date_s = f"{dt.day} {mois[dt.month - 1]} {dt.year}, {dt.hour:02d}:{dt.minute:02d}"
+        except (TypeError, ValueError):
+            date_s = str(run.get("at", ""))[:19]
+        d = float(run.get("duration_s", 0))
+        tq = int(run.get("total_q", 0))
+        sc = int(run.get("score", 0))
+        err = int(run.get("errors", 0))
+        fc = bool(run.get("flashcard", False))
+        mode_lbl = "flashcards" if fc else "quiz"
+        return (
+            f"{date_s} · {mode_lbl} · {d:.0f}s · {sc}/{tq} · {err} erreur(s)"
+        )
+
+    def _build_full_table_runs_home_panel(self, parent):
+        """Résumé + import/export sous le bouton « Toute la table »."""
+        box = tk.Frame(parent, bg=BG_DARK)
+        box.pack(fill="x", pady=(10, 4))
+        inner = self.make_card(box, padx=12, pady=10)
+        inner.pack(fill="x")
+        tk.Label(
+            inner,
+            text="Dernières sessions « Toute la table »",
+            font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_ACCENT,
+        ).pack(anchor="w")
+        runs = list(reversed(self.full_table_runs[-5:]))
+        if not runs:
+            tk.Label(
+                inner,
+                text="Aucune session enregistrée pour l’instant.",
+                font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
+                wraplength=520, justify="left",
+            ).pack(anchor="w", pady=(6, 4))
+        else:
+            for run in runs:
+                tk.Label(
+                    inner,
+                    text=self._format_full_table_run_line(run),
+                    font=FONT_SMALL, bg=BG_CARD, fg=FG_PRIMARY,
+                    wraplength=520, justify="left",
+                ).pack(anchor="w", pady=(2, 0))
+        row = tk.Frame(inner, bg=BG_CARD)
+        row.pack(fill="x", pady=(8, 0))
+        self.make_button(
+            row, "📤 Exporter…", self._export_full_table_runs_file, width=14,
+        ).pack(side="left", padx=(0, 8))
+        self.make_button(
+            row, "📥 Importer…", self._import_full_table_runs_file, width=14,
+        ).pack(side="left", padx=0)
+
+    def _export_full_table_runs_file(self):
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Exporter l’historique « Toute la table »",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json")],
+        )
+        if not path:
+            return
+        payload = {
+            "mnemos_full_table_runs_version": FULL_TABLE_RUNS_VERSION,
+            "runs": list(self.full_table_runs),
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            messagebox.showinfo(
+                "Export réussi",
+                f"{len(self.full_table_runs)} session(s) enregistrée(s) dans :\n{path}",
+            )
+        except OSError as e:
+            messagebox.showerror("Export", str(e))
+
+    def _import_full_table_runs_file(self):
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Importer un historique « Toute la table »",
+            filetypes=[("JSON", "*.json"), ("Tous les fichiers", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            messagebox.showerror("Import", str(e))
+            return
+        raw = []
+        if isinstance(data, list):
+            raw = data
+        elif isinstance(data, dict) and isinstance(data.get("runs"), list):
+            raw = data["runs"]
+        incoming = []
+        for item in raw:
+            row = _normalize_full_table_run(item)
+            if row:
+                incoming.append(row)
+        if not incoming:
+            messagebox.showerror(
+                "Import",
+                "Aucune session valide dans ce fichier.",
+            )
+            return
+        merge = messagebox.askyesno(
+            "Importer",
+            f"{len(incoming)} session(s) valide(s).\n\n"
+            "Oui = fusionner avec l’historique actuel.\n"
+            "Non = remplacer tout l’historique par ce fichier.",
+        )
+        if merge:
+            seen = {r.get("at") for r in self.full_table_runs}
+            for r in incoming:
+                if r["at"] not in seen:
+                    self.full_table_runs.append(r)
+                    seen.add(r["at"])
+            self.full_table_runs.sort(key=lambda x: str(x.get("at", "")))
+            self.full_table_runs = self.full_table_runs[-200:]
+        else:
+            self.full_table_runs = incoming[-200:]
+        save_full_table_runs(self.full_table_runs)
+        messagebox.showinfo("Import", "Historique mis à jour.")
+        self.show_main_menu()
 
     @staticmethod
     def _bind_mousewheel(widget):
@@ -1303,7 +1562,6 @@ class QuizApp(tk.Tk):
             ("2", "🎯  Focus points faibles", self.start_focus_mode),
             ("3", "🎲  Quiz aléatoire", self.start_random_mode),
             ("4", "📋  Toute la table", self.start_full_mode),
-            ("5", "🃏  Mode Flashcard", self.start_flashcard_mode),
         ]
         for key, text, cmd in modes:
             row = tk.Frame(modes_frame, bg=BG_DARK)
@@ -1315,6 +1573,8 @@ class QuizApp(tk.Tk):
             self.make_button(row, text, cmd, fill_x=True).pack(
                 side="left", fill="both", expand=True,
             )
+            if key == "4":
+                self._build_full_table_runs_home_panel(modes_frame)
 
         for key, _, cmd in modes:
             self.bind(key, lambda e, c=cmd: c())
@@ -1381,7 +1641,7 @@ class QuizApp(tk.Tk):
         upd_lbl.bind("<Button-1>", lambda e: self._check_update())
         tk.Label(
             right_foot,
-            text="Raccourcis : 1-5 = modes · P = conseil · Échap = menu · Entrée = valider",
+            text="Raccourcis : 1-4 = modes · P = conseil · Échap = menu · Entrée = valider",
             font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
         ).pack(side="right")
 
@@ -1916,6 +2176,7 @@ class QuizApp(tk.Tk):
 
         # Direction
         self._add_direction_picker(card)
+        self._add_flashcard_option(card)
 
         # Boutons
         btn_frame = tk.Frame(self.container, bg=BG_DARK)
@@ -1956,7 +2217,9 @@ class QuizApp(tk.Tk):
                 "Aucune paire avec nombre pair dans la table.",
             )
             return
-        self._build_questions(pairs)
+        self._build_questions(
+            pairs, use_flashcard=self.session_flashcard_var.get(),
+        )
 
     def _start_quiz_odd_numbers(self):
         pairs = []
@@ -1970,7 +2233,9 @@ class QuizApp(tk.Tk):
                 "Aucune paire avec nombre impair dans la table.",
             )
             return
-        self._build_questions(pairs)
+        self._build_questions(
+            pairs, use_flashcard=self.session_flashcard_var.get(),
+        )
 
     def _add_direction_picker(self, parent):
         """Widget de sélection de direction réutilisable."""
@@ -2003,7 +2268,9 @@ class QuizApp(tk.Tk):
             messagebox.showwarning("Attention",
                                    "Aucune correspondance pour ces blocs.")
             return
-        self._build_questions(pairs)
+        self._build_questions(
+            pairs, use_flashcard=self.session_flashcard_var.get(),
+        )
 
     # --------------------------------------------------------
     # Modes de démarrage rapide
@@ -2030,7 +2297,9 @@ class QuizApp(tk.Tk):
                 "Aucune paire à réviser (stats ou points faibles manuels).",
             )
             return
-        self._build_questions(pool)
+        self._build_questions(
+            pool, use_flashcard=self.session_flashcard_var.get(),
+        )
 
     def start_random_mode(self):
         self._show_random_config()
@@ -2066,6 +2335,7 @@ class QuizApp(tk.Tk):
         ).pack(side="left", padx=(10, 0))
 
         self._add_direction_picker(card)
+        self._add_flashcard_option(card)
 
         btn_frame = tk.Frame(self.container, bg=BG_DARK)
         btn_frame.pack(pady=30)
@@ -2093,7 +2363,9 @@ class QuizApp(tk.Tk):
                 "Attention", "Maximum 500 questions pour cette session.")
             return
         pairs = [random.choice(self.table) for _ in range(nq)]
-        self._build_questions(pairs)
+        self._build_questions(
+            pairs, use_flashcard=self.session_flashcard_var.get(),
+        )
 
     def start_full_mode(self):
         self.clear()
@@ -2130,6 +2402,8 @@ class QuizApp(tk.Tk):
             justify="left",
         ).pack(anchor="w")
 
+        self._add_flashcard_option(card)
+
         btn_frame = tk.Frame(self.container, bg=BG_DARK)
         btn_frame.pack(pady=28)
         self.make_button(
@@ -2142,7 +2416,16 @@ class QuizApp(tk.Tk):
 
     def _do_start_full(self):
         shuffle_q = self.full_shuffle_var.get()
-        self._build_questions(list(self.table), shuffle_questions=shuffle_q)
+        self._full_table_meta = {
+            "sens": self.sens_var.get(),
+            "shuffle": shuffle_q,
+        }
+        self._build_questions(
+            list(self.table),
+            shuffle_questions=shuffle_q,
+            use_flashcard=self.session_flashcard_var.get(),
+            session_tag="full_table",
+        )
 
     def _show_sens_then_start(self, callback):
         """Demande la direction puis lance le quiz."""
@@ -2175,6 +2458,8 @@ class QuizApp(tk.Tk):
             tk.Label(f, text=f"       {desc}", font=FONT_SMALL,
                      bg=BG_CARD, fg=FG_SECONDARY).pack(anchor="w")
 
+        self._add_flashcard_option(card)
+
         btn_frame = tk.Frame(self.container, bg=BG_DARK)
         btn_frame.pack(pady=30)
         self.make_button(btn_frame, "🚀  Lancer", callback,
@@ -2184,13 +2469,20 @@ class QuizApp(tk.Tk):
 
     def _unbind_menu_keys(self):
         """Détache les raccourcis du menu principal."""
-        for key in ("1", "2", "3", "4", "5", "p"):
+        for key in ("1", "2", "3", "4", "p"):
             self.unbind(key)
 
     # --------------------------------------------------------
     # Construction des questions et lancement
     # --------------------------------------------------------
-    def _build_questions(self, pairs, shuffle_questions=True):
+    def _build_questions(
+        self,
+        pairs,
+        shuffle_questions=True,
+        *,
+        use_flashcard=False,
+        session_tag=None,
+    ):
         sens = self.sens_var.get()
         if not shuffle_questions:
             pairs = _sort_table_pairs(list(pairs))
@@ -2202,6 +2494,8 @@ class QuizApp(tk.Tk):
                 self.questions.append(("mot->nombre", nombre, mot))
         if shuffle_questions:
             random.shuffle(self.questions)
+        self._session_tag = session_tag
+        self._quiz_is_flashcard = use_flashcard
         self.current_q = 0
         self.score = 0
         self.streak = 0
@@ -2209,6 +2503,9 @@ class QuizApp(tk.Tk):
         self.results = []
         self.quiz_start_time = time.time()
         self.question_start_time = time.time()
+        if use_flashcard:
+            self._launch_flashcard_from_questions()
+            return
         self._show_question()
 
     # --------------------------------------------------------
@@ -2511,6 +2808,12 @@ class QuizApp(tk.Tk):
         total_q = len(self.questions)
         pct = (self.score / total_q * 100) if total_q else 0
 
+        if getattr(self, "_session_tag", None) == "full_table":
+            err_count = sum(1 for r in self.results if not r[4])
+            self._record_full_table_run(
+                total_q, self.score, err_count, total_time, False,
+            )
+
         tk.Label(
             self.container, text="🏁 Résultats", font=FONT_TITLE,
             bg=BG_DARK, fg=FG_ACCENT,
@@ -2597,6 +2900,7 @@ class QuizApp(tk.Tk):
 
     def _requiz_errors(self, errors):
         """Relance un quiz uniquement sur les erreurs."""
+        self._session_tag = None
         self.questions = [
             (mode, nombre, mot) for mode, nombre, mot, _, _, _ in errors
         ]
@@ -2608,187 +2912,14 @@ class QuizApp(tk.Tk):
         self.results = []
         self.quiz_start_time = time.time()
         self.question_start_time = time.time()
-        self._show_question()
+        if getattr(self, "_quiz_is_flashcard", False):
+            self._launch_flashcard_from_questions()
+        else:
+            self._show_question()
 
     # --------------------------------------------------------
-    # MODE FLASHCARD
+    # MODE FLASHCARD (option des modes quiz)
     # --------------------------------------------------------
-    def _build_flashcard_tuples(self, pairs, sens):
-        """Liste (mode, nombre, mot) pour les cartes, selon la direction."""
-        out = []
-        for nombre, mot in pairs:
-            if sens in ("1", "3"):
-                out.append(("nombre->mot", nombre, mot))
-            if sens in ("2", "3"):
-                out.append(("mot->nombre", nombre, mot))
-        return out
-
-    def start_flashcard_mode(self):
-        self.clear()
-        self._unbind_menu_keys()
-
-        tk.Label(
-            self.container, text="🃏 Mode Flashcard", font=FONT_TITLE,
-            bg=BG_DARK, fg=FG_MAUVE,
-        ).pack(pady=(35, 10))
-        tk.Label(
-            self.container,
-            text="Choisis les blocs, la direction et le nombre de cartes. "
-                 "Retourne la carte, puis indique si tu l’avais bien mémorisée "
-                 "(les stats sont mises à jour).",
-            font=FONT_BODY, bg=BG_DARK, fg=FG_SECONDARY, wraplength=640,
-        ).pack(pady=(0, 18))
-
-        card = self.make_card(self.container)
-        card.pack(padx=80, fill="x")
-
-        tk.Label(
-            card,
-            text="Blocs à inclure :",
-            font=FONT_BODY, bg=BG_CARD, fg=FG_SECONDARY,
-        ).pack(anchor="w", pady=(5, 8))
-
-        n_blocs_fc = _bloc_count_for_table(self.table)
-        rows_fc = max(1, (n_blocs_fc + 3) // 4)
-        fc_scroll_h = min(440, max(168, 20 + rows_fc * 36))
-        fc_scroll = tk.Frame(card, bg=BG_CARD, height=fc_scroll_h)
-        fc_scroll.pack(fill="x", pady=4)
-        fc_scroll.pack_propagate(False)
-        fc_canvas = tk.Canvas(
-            fc_scroll, bg=BG_CARD, highlightthickness=0,
-            height=max(140, fc_scroll_h - 8),
-        )
-        fc_sb = ttk.Scrollbar(fc_scroll, orient="vertical", command=fc_canvas.yview)
-        blocs_frame = tk.Frame(fc_canvas, bg=BG_CARD)
-        blocs_frame.bind(
-            "<Configure>",
-            lambda e, c=fc_canvas: c.configure(scrollregion=c.bbox("all")),
-        )
-        fc_canvas.create_window((0, 0), window=blocs_frame, anchor="nw")
-        fc_canvas.configure(yscrollcommand=fc_sb.set)
-        fc_canvas.pack(side="left", fill="both", expand=True)
-        fc_sb.pack(side="right", fill="y")
-        self._bind_mousewheel(fc_canvas)
-
-        self.fc_bloc_vars = {}
-        for i in range(n_blocs_fc):
-            start = i * 10
-            end = start + 9
-            var = tk.BooleanVar(value=False)
-            self.fc_bloc_vars[i] = var
-            tk.Checkbutton(
-                blocs_frame, text=f"  {start:>3}–{end}", variable=var,
-                font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_PRIMARY,
-                selectcolor=CHECK_BG, activebackground=BG_CARD,
-                activeforeground=CHECK_ON, highlightthickness=0,
-                indicatoron=True, onvalue=True, offvalue=False,
-            ).grid(row=i // 4, column=i % 4, padx=12, pady=5, sticky="w")
-
-        quick_frame = tk.Frame(card, bg=BG_CARD)
-        quick_frame.pack(pady=(4, 2))
-        self.make_button(
-            quick_frame, "Tout sélectionner", self._fc_select_all_blocs, width=18,
-        ).pack(side="left", padx=5)
-        self.make_button(
-            quick_frame, "Tout désélectionner", self._fc_deselect_all_blocs,
-            width=18,
-        ).pack(side="left", padx=5)
-
-        self._add_direction_picker(card)
-
-        nb_row = tk.Frame(card, bg=BG_CARD)
-        nb_row.pack(pady=(14, 6), fill="x")
-        tk.Label(
-            nb_row, text="Nombre de cartes :",
-            font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_PRIMARY,
-        ).pack(side="left", padx=(0, 12))
-        self.fc_count_var = tk.StringVar(value="20")
-        tk.Entry(
-            nb_row, textvariable=self.fc_count_var, font=FONT_BODY,
-            bg=BG_INPUT, fg=FG_PRIMARY, insertbackground=FG_PRIMARY,
-            relief="flat", width=8, justify="center",
-        ).pack(side="left", ipady=4)
-        tk.Label(
-            nb_row,
-            text="  (tirage parmi les cartes possibles selon blocs + sens)",
-            font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
-        ).pack(side="left", padx=(10, 0))
-
-        self.fc_shuffle_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(
-            card, text="  Ordre aléatoire", variable=self.fc_shuffle_var,
-            font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_PRIMARY,
-            selectcolor=CHECK_BG, activebackground=BG_CARD,
-            activeforeground=CHECK_ON, highlightthickness=0,
-        ).pack(anchor="w", pady=(6, 4))
-
-        btn_frame = tk.Frame(self.container, bg=BG_DARK)
-        btn_frame.pack(pady=20)
-        self.make_button(
-            btn_frame, "🃏  Commencer", self._launch_flashcards, accent=True,
-        ).pack(side="left", padx=10)
-        self.make_button(
-            btn_frame, "⬅  Retour", self.show_main_menu,
-        ).pack(side="left", padx=10)
-
-    def _fc_select_all_blocs(self):
-        for v in self.fc_bloc_vars.values():
-            v.set(True)
-
-    def _fc_deselect_all_blocs(self):
-        for v in self.fc_bloc_vars.values():
-            v.set(False)
-
-    def _launch_flashcards(self):
-        selected = [i for i, v in self.fc_bloc_vars.items() if v.get()]
-        if not selected:
-            messagebox.showwarning(
-                "Attention", "Sélectionne au moins un bloc !")
-            return
-        pairs = []
-        for bloc_i in selected:
-            pairs.extend(_pairs_in_bloc_indices(self.table, bloc_i))
-        if not pairs:
-            messagebox.showwarning(
-                "Attention", "Aucune correspondance pour ces blocs.")
-            return
-
-        sens = self.sens_var.get()
-        pool = self._build_flashcard_tuples(pairs, sens)
-        if not pool:
-            messagebox.showwarning("Attention", "Aucune carte générée.")
-            return
-
-        try:
-            want = int(self.fc_count_var.get().strip())
-        except ValueError:
-            messagebox.showwarning(
-                "Attention", "Nombre de cartes invalide (entier).")
-            return
-        if want < 1:
-            messagebox.showwarning("Attention", "Il faut au moins une carte.")
-            return
-
-        if self.fc_shuffle_var.get():
-            random.shuffle(pool)
-        n = min(want, len(pool))
-        if want > len(pool):
-            messagebox.showinfo(
-                "Cartes disponibles",
-                f"Seulement {len(pool)} carte(s) possible(s) avec ces options — "
-                f"session de {len(pool)} cartes.",
-            )
-        self.fc_cards = pool[:n]
-
-        self.fc_idx = 0
-        self.fc_revealed = False
-        self.fc_score = 0
-        self.fc_streak = 0
-        self.fc_best_streak = 0
-        self.fc_results = []
-        self.fc_quiz_start = time.time()
-        self._show_flashcard()
-
     def _show_flashcard(self):
         self.clear()
         for key in ("<space>", "<Return>", "<Right>", "r", "f"):
@@ -2996,6 +3127,11 @@ class QuizApp(tk.Tk):
         total = len(self.fc_cards)
         good = self.fc_score
         total_s = time.time() - getattr(self, "fc_quiz_start", time.time())
+        if getattr(self, "_session_tag", None) == "full_table":
+            err_count = sum(1 for r in self.fc_results if not r[4])
+            self._record_full_table_run(
+                total, good, err_count, total_s, True,
+            )
         tk.Label(
             self.container, text="🃏 Session terminée", font=FONT_TITLE,
             bg=BG_DARK, fg=FG_MAUVE,
@@ -3019,11 +3155,7 @@ class QuizApp(tk.Tk):
         row = tk.Frame(self.container, bg=BG_DARK)
         row.pack(pady=20)
         self.make_button(
-            row, "🃏  Nouvelle session", self.start_flashcard_mode,
-            accent=True, width=22,
-        ).pack(side="left", padx=8)
-        self.make_button(
-            row, "⬅  Menu principal", self.show_main_menu, width=20,
+            row, "⬅  Menu principal", self.show_main_menu, accent=True, width=22,
         ).pack(side="left", padx=8)
 
     # --------------------------------------------------------
