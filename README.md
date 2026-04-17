@@ -88,6 +88,8 @@ python3 -m mnemos
 | `make reset` | Remet les stats à zéro |
 | `make dmg` | Build .app, .dmg et .zip (macOS) |
 | `make release` | Build + publie sur GitHub |
+| `make update-app` | macOS : dernière release GitHub → remplace `/Applications/Mnemos.app` (fermer l’app) |
+| `make update-app-yes` | Idem sans confirmation interactive |
 | `make help` | Affiche l'aide |
 
 ---

@@ -10,7 +10,7 @@ VERSION := $(shell grep -E '^VERSION = ' mnemos/config.py | cut -d'"' -f2)
 DMG     := dist/Mnemos-$(VERSION).dmg
 ZIP     := dist/Mnemos-$(VERSION).zip
 
-.PHONY: run check clean clean-build reset dmg tag release publish help
+.PHONY: run check clean clean-build reset dmg tag release publish update-app update-app-yes help
 
 ## run : Lance l'application
 run:
@@ -67,6 +67,16 @@ release: dmg
 
 ## publish : tag + release (commit/push d'abord !)
 publish: tag release
+
+## update-app : Dernière release GitHub → remplace /Applications/Mnemos.app (fermer l’app ; macOS)
+update-app:
+	@test "$$(uname)" = "Darwin" || { echo "❌ macOS uniquement"; exit 1; }
+	@$(PYTHON) tools/apply_github_release_to_app.py
+
+## update-app-yes : idem update-app sans question de confirmation
+update-app-yes:
+	@test "$$(uname)" = "Darwin" || { echo "❌ macOS uniquement"; exit 1; }
+	@$(PYTHON) tools/apply_github_release_to_app.py --yes
 
 ## reset : Remet les statistiques à zéro
 reset:
