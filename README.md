@@ -58,7 +58,7 @@ cd Mnemos
 pip install -r requirements.txt
 ```
 
-Les releases publient les fichiers `Mnemos-*.zip` / `Mnemos-*.dmg` (voir `GITHUB_REPO` dans `quiz_rappel_gui.py`). Les anciennes releases peuvent encore porter le préfixe `Mnémos-` ; l’app les reconnaît encore.
+Les releases publient les fichiers `Mnemos-*.zip` / `Mnemos-*.dmg` (voir `GITHUB_REPO` dans `mnemos/config.py`). Les anciennes releases peuvent encore porter le préfixe `Mnémos-` ; l’app les reconnaît encore.
 
 Le script `scripts/build_dmg.sh` exécute `xattr -cr` sur le `.dmg`, le `.zip` et le `.app` (signature ad hoc + nettoyage des attributs étendus). Ce n’est **pas** équivalent à la **notarisation Apple** : sans compte développeur payant et workflow de notarisation, macOS peut encore afficher *« Élément non ouvert »* / *logiciel malveillant* pour une app téléchargée depuis Internet.
 
@@ -74,6 +74,8 @@ La seule façon d’éviter cet avertissement pour tous les utilisateurs est de 
 make run
 # ou
 python3 quiz_rappel_gui.py
+# ou (même bootstrap + package)
+python3 -m mnemos
 ```
 
 ### Commandes
@@ -104,7 +106,7 @@ Génère dans `dist/` :
 ### Release
 
 ```bash
-# 1. Incrémenter VERSION dans quiz_rappel_gui.py
+# 1. Incrémenter VERSION dans mnemos/config.py
 # 2. Commit et push
 git add -A && git commit -m "..." && git push
 
@@ -157,7 +159,20 @@ Sortie dans `dist/Mnemos/` (exécutable `Mnemos` ou `Mnemos.exe`).
 
 ```
 .
-├── quiz_rappel_gui.py      # Application principale
+├── quiz_rappel_gui.py      # Point d’entrée fin (bootstrap macOS puis package mnemos)
+├── mnemos/                 # Application découpée par domaine
+│   ├── config.py           # VERSION, constantes produit
+│   ├── bootstrap_env.py    # stdin / Tk macOS (sans import tkinter)
+│   ├── entry.py            # main() après bootstrap
+│   ├── paths.py            # chemins Application Support
+│   ├── domain/table.py     # Logique table (tri, blocs)
+│   ├── storage/            # JSON / CSV (stats, prefs, plan, sessions…)
+│   ├── updater/            # GitHub releases, install macOS
+│   └── ui/
+│       ├── app.py          # QuizApp (compose les mixins)
+│       ├── _quiz_shared.py # Imports partagés écran
+│       ├── widgets.py      # Boutons / cartes / molette
+│       └── screens/        # Mixins par fonctionnalité (accueil, quiz, stats…)
 ├── Mnemos.spec             # PyInstaller — bundle macOS (.app)
 ├── Mnemos_ci.spec          # PyInstaller — dossier Win/Linux (CI)
 ├── Mnemos_icon.png         # Icône source
@@ -166,6 +181,9 @@ Sortie dans `dist/Mnemos/` (exécutable `Mnemos` ou `Mnemos.exe`).
 ├── scripts/
 │   ├── build_dmg.sh        # Build .app / .dmg / .zip
 │   └── make_icns.sh        # Génère l'icône .icns
+├── tools/
+│   ├── generate_ui_app.py  # Régénère app.py depuis un monolithe Git (optionnel)
+│   └── build_screen_mixins.py  # Découpe app monolithique → screens/ (rare)
 ├── Makefile
 ├── requirements.txt
 └── README.md

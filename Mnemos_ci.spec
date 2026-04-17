@@ -6,8 +6,8 @@ import re
 
 block_cipher = None
 
-with open("quiz_rappel_gui.py", encoding="utf-8") as f:
-    _v = re.search(r'VERSION\s*=\s*"([^"]+)"', f.read())
+with open("mnemos/config.py", encoding="utf-8") as f:
+    _v = re.search(r'^VERSION\s*=\s*"([^"]+)"', f.read(), re.M)
     APP_VERSION = _v.group(1) if _v else "0.0.0"
 
 a = Analysis(
@@ -18,7 +18,17 @@ a = Analysis(
         ("Mnemos_icon.png", "."),
         ("Plan_hebdomadaire_Mnemos.pdf", "."),
     ],
-    hiddenimports=["PIL", "PIL._tkinter_finder", "certifi"],
+    hiddenimports=[
+        "PIL", "PIL._tkinter_finder", "certifi",
+        "mnemos", "mnemos.bootstrap_env", "mnemos.config", "mnemos.theme",
+        "mnemos.paths", "mnemos.domain.table", "mnemos.storage",
+        "mnemos.ui", "mnemos.ui._quiz_shared", "mnemos.ui.widgets", "mnemos.ui.assets",
+        "mnemos.ui.screens", "mnemos.ui.screens.drawing", "mnemos.ui.screens.flashcard",
+        "mnemos.ui.screens.home", "mnemos.ui.screens.preferences", "mnemos.ui.screens.quiz",
+        "mnemos.ui.screens.stats", "mnemos.ui.screens.table_browse",
+        "mnemos.ui.screens.table_edit", "mnemos.updater", "mnemos.updater.check",
+        "mnemos.updater.install", "mnemos.updater.http", "mnemos.updater.releases",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

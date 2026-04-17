@@ -24,7 +24,7 @@ sign_macos_app() {
 APP_NAME="Mnemos"
 DIST="dist"
 DMG_DIR="$DIST/dmg"
-DMG_FILE="$DIST/Mnemos-$(grep -E '^VERSION = ' quiz_rappel_gui.py | cut -d'"' -f2).dmg"
+DMG_FILE="$DIST/Mnemos-$(grep -E '^VERSION = ' mnemos/config.py | cut -d'"' -f2).dmg"
 
 echo "🔨 Build de $APP_NAME…"
 echo ""
@@ -105,7 +105,7 @@ if [[ -f "$DMG_FILE" ]]; then
 fi
 
 # 3. Créer le .zip pour la mise à jour auto
-VERSION=$(grep -E '^VERSION = ' quiz_rappel_gui.py | cut -d'"' -f2)
+VERSION=$(grep -E '^VERSION = ' mnemos/config.py | cut -d'"' -f2)
 ZIP_FILE="$DIST/Mnemos-${VERSION}.zip"
 echo "📦 Création du .zip (mise à jour auto)…"
 rm -f "$ZIP_FILE"

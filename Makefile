@@ -6,7 +6,7 @@ PYTHON  ?= python3
 GUI     := quiz_rappel_gui.py
 STATS   := .app_data/stats.json
 
-VERSION := $(shell grep -E '^VERSION = ' $(GUI) | cut -d'"' -f2)
+VERSION := $(shell grep -E '^VERSION = ' mnemos/config.py | cut -d'"' -f2)
 DMG     := dist/Mnemos-$(VERSION).dmg
 ZIP     := dist/Mnemos-$(VERSION).zip
 
@@ -20,6 +20,7 @@ run:
 check:
 	@echo "🔍 Vérification de la syntaxe…"
 	@$(PYTHON) -m py_compile $(GUI) && echo "  ✅ $(GUI) OK"
+	@$(PYTHON) -m compileall -q mnemos && echo "  ✅ mnemos/ OK"
 	@echo "✅ Tout est bon !"
 
 ## clean : Supprime les fichiers cache
