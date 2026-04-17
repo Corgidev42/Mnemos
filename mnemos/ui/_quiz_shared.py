@@ -22,6 +22,7 @@ from mnemos.domain import table as domain_table
 from mnemos.paths import (
     app_resource_dir as _app_resource_dir,
     get_app_support_dir as _get_app_support_dir,
+    table_path as _table_path,
     weekly_plan_pdf_path as _weekly_plan_pdf_path,
 )
 from mnemos.storage import (
@@ -70,7 +71,7 @@ SESSION_KIND_LABELS_FR = config.SESSION_KIND_LABELS_FR
 STATS_KEY_SEP = config.STATS_KEY_SEP
 SESSION_RUNS_VERSION = config.SESSION_RUNS_VERSION
 
-for _name in (
+for _theme_key in (
     "BG_DARK", "BG_CARD", "BG_INPUT", "BG_CARD_HOVER",
     "FG_PRIMARY", "FG_SECONDARY", "FG_ACCENT", "FG_GREEN", "FG_RED",
     "FG_YELLOW", "FG_MAUVE", "FG_ORANGE", "FG_GOLD",
@@ -80,7 +81,8 @@ for _name in (
     "FONT_BODY_BOLD", "FONT_SMALL", "FONT_BIG", "FONT_HUGE",
     "FONT_QUESTION", "FONT_INPUT", "FONT_STREAK",
 ):
-    globals()[_name] = getattr(theme, _name)
+    globals()[_theme_key] = getattr(theme, _theme_key)
+del _theme_key
 
 _parse_nombre_int = domain_table.parse_nombre_int
 _sort_table_pairs = domain_table.sort_table_pairs
@@ -102,4 +104,6 @@ _can_auto_update = updater_install.can_auto_update
 _install_update_self = updater_install.install_update_self
 _get_app_bundle_path = updater_install.get_app_bundle_path
 
+# « from _quiz_shared import * » n’exporte pas les noms « _ » sans __all__ explicite.
+__all__ = [k for k in globals().keys() if not k.startswith("__")]
 

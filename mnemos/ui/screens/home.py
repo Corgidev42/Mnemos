@@ -209,33 +209,6 @@ class HomeMixin:
             f"table Mnemos (mnemos_export_version ≥ {TABLE_EXPORT_VERSION}).",
         )
 
-    @staticmethod
-    def _bind_mousewheel(widget):
-        """Défilement molette sur le widget (Canvas, Text, etc.) — pas de bind global."""
-
-        def _on_mousewheel(event):
-            if sys.platform == "win32":
-                # Windows : delta multiple de 120 par cran ; ancien code scrollait trop fort.
-                step = int(-event.delta / 120)
-                if step == 0:
-                    step = -1 if event.delta > 0 else 1
-                widget.yview_scroll(step, "units")
-            elif sys.platform == "darwin":
-                d = event.delta
-                if abs(d) > 100:
-                    widget.yview_scroll(int(-d / 40), "units")
-                elif abs(d) > 8:
-                    widget.yview_scroll(int(-d / 12), "units")
-                else:
-                    widget.yview_scroll(-1 if d > 0 else 1, "units")
-            else:
-                if event.delta:
-                    widget.yview_scroll(int(-event.delta / 120), "units")
-
-        widget.bind("<MouseWheel>", _on_mousewheel)
-        widget.bind("<Button-4>", lambda e: widget.yview_scroll(-2, "units"))
-        widget.bind("<Button-5>", lambda e: widget.yview_scroll(2, "units"))
-
     # --------------------------------------------------------
     # Écran : Menu principal
     # --------------------------------------------------------
