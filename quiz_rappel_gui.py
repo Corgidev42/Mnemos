@@ -64,7 +64,7 @@ except ImportError:
     _HAS_PIL = False
 
 # Version — incrémenter à chaque release (ex: v1.0.1)
-VERSION = "1.6.9"
+VERSION = "1.7.0"
 # Nom produit et bundle : ASCII « Mnemos » partout (évite zip / chemins cassés).
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
@@ -556,15 +556,13 @@ def save_manual_weak_set(manual_weak, table):
     return set(cleaned)
 
 
-FULL_TABLE_RUNS_VERSION = 1
-
-
 def _full_table_runs_path():
+    """Ancien fichier d’historique (migration vers session_runs.json)."""
     return os.path.join(_get_app_support_dir(), "full_table_runs.json")
 
 
 def _normalize_full_table_run(obj):
-    """Valide une entrée d’historique « toute la table »."""
+    """Valide une ligne legacy full_table_runs.json (sans clé « kind »)."""
     if not isinstance(obj, dict):
         return None
     try:
@@ -593,7 +591,7 @@ def _normalize_full_table_run(obj):
 
 
 def load_full_table_runs():
-    """Historique des sessions « Toute la table » (quiz ou flashcards)."""
+    """Lit uniquement l’ancien full_table_runs.json (migration)."""
     path = _full_table_runs_path()
     if not os.path.isfile(path):
         return []
@@ -618,16 +616,100 @@ def load_full_table_runs():
     return out[-200:]
 
 
-def save_full_table_runs(runs):
-    """Écrit l’historique « toute la table »."""
-    path = _full_table_runs_path()
+SESSION_RUNS_VERSION = 1
+FULL_BACKUP_VERSION = 1
+
+SESSION_KIND_LABELS_FR = {
+    "full_table": "Toute la table",
+    "bloc": "Par bloc",
+    "focus": "Focus faibles",
+    "random": "Aléatoire",
+    "errors_review": "Re-quiz erreurs",
+}
+
+_VALID_SESSION_KINDS = frozenset(SESSION_KIND_LABELS_FR)
+
+
+def _session_runs_path():
+    return os.path.join(_get_app_support_dir(), "session_runs.json")
+
+
+def _normalize_session_run(obj):
+    """Valide une entrée d’historique de session (tous modes)."""
+    if not isinstance(obj, dict):
+        return None
+    kind = str(obj.get("kind", "")).strip()
+    if kind not in _VALID_SESSION_KINDS:
+        return None
+    try:
+        at = str(obj.get("at", "")).strip()
+        duration_s = float(obj["duration_s"])
+        total_q = int(obj["total_q"])
+        score = int(obj["score"])
+        errors = int(obj["errors"])
+        flashcard = bool(obj.get("flashcard", False))
+        sens = str(obj.get("sens", ""))
+        shuffle = bool(obj.get("shuffle", False))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not at or total_q < 0 or score < 0 or errors < 0:
+        return None
+    return {
+        "at": at,
+        "kind": kind,
+        "duration_s": round(duration_s, 1),
+        "total_q": total_q,
+        "score": score,
+        "errors": errors,
+        "flashcard": flashcard,
+        "sens": sens,
+        "shuffle": shuffle,
+    }
+
+
+def load_session_runs():
+    """Historique des sessions terminées (quiz + flashcards, tous modes)."""
+    path = _session_runs_path()
+    runs = []
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError, TypeError):
+            data = None
+        raw = []
+        if isinstance(data, list):
+            raw = data
+        elif isinstance(data, dict):
+            if int(data.get("mnemos_session_runs_version", 0)) >= 1:
+                r = data.get("runs")
+                if isinstance(r, list):
+                    raw = r
+        for item in raw:
+            row = _normalize_session_run(item)
+            if row:
+                runs.append(row)
+    if not runs and os.path.isfile(_full_table_runs_path()):
+        for item in load_full_table_runs():
+            base = dict(item)
+            base["kind"] = "full_table"
+            row = _normalize_session_run(base)
+            if row:
+                runs.append(row)
+        if runs:
+            save_session_runs(runs)
+    return runs[-500:]
+
+
+def save_session_runs(runs):
+    path = _session_runs_path()
     clean = []
-    for item in runs[-200:]:
-        row = _normalize_full_table_run(item)
+    for item in runs[-500:]:
+        row = _normalize_session_run(item)
         if row:
             clean.append(row)
     payload = {
-        "mnemos_full_table_runs_version": FULL_TABLE_RUNS_VERSION,
+        "mnemos_session_runs_version": SESSION_RUNS_VERSION,
         "runs": clean,
     }
     with open(path, "w", encoding="utf-8") as f:
@@ -1208,7 +1290,7 @@ class QuizApp(tk.Tk):
         self.stats = load_stats(self.table)
         self.preferences = load_preferences()
         self.manual_weak = load_manual_weak_set(self.table)
-        self.full_table_runs = load_full_table_runs()
+        self.session_runs = load_session_runs()
         self.session_flashcard_var = tk.BooleanVar(value=False)
         self._full_table_meta = {}
 
@@ -1226,6 +1308,7 @@ class QuizApp(tk.Tk):
         self.question_start_time = 0
         self.results = []  # (mode, nombre, mot, user_answer, correct, time)
         self._auto_advance_id = None
+        self._stats_main_tab = "pairs"  # pairs | sessions
         self._stats_sort_tab = "worst"  # onglets « moins / plus connus » (colonne total)
         self._stats_sort_column = "total"  # total|idx|nombre|mot|s_nm|s_mn|t_nm|t_mn
         self._stats_sort_desc = False  # False = scores croissants (faibles d’abord)
@@ -1316,28 +1399,37 @@ class QuizApp(tk.Tk):
         self.fc_quiz_start = time.time()
         self._show_flashcard()
 
-    def _record_full_table_run(
-        self, total_q, score, errors_count, duration_s, flashcard,
+    def _record_session_run(
+        self, *, total_q, score, errors_count, duration_s, flashcard,
     ):
-        """Ajoute une ligne à l’historique des sessions « toute la table »."""
+        """Enregistre une session terminée (temps, score, erreurs, mode)."""
+        if total_q <= 0:
+            return
+        kind = getattr(self, "_session_kind", None) or "bloc"
+        if kind not in _VALID_SESSION_KINDS:
+            kind = "bloc"
         meta = getattr(self, "_full_table_meta", None) or {}
         run = {
             "at": datetime.datetime.now().replace(microsecond=0).isoformat(),
+            "kind": kind,
             "duration_s": round(float(duration_s), 1),
             "total_q": int(total_q),
             "score": int(score),
             "errors": int(errors_count),
+            "flashcard": bool(flashcard),
             "sens": str(meta.get("sens", "")),
             "shuffle": bool(meta.get("shuffle", False)),
-            "flashcard": bool(flashcard),
         }
-        self.full_table_runs.append(run)
-        self.full_table_runs = self.full_table_runs[-200:]
-        save_full_table_runs(self.full_table_runs)
+        row = _normalize_session_run(run)
+        if not row:
+            return
+        self.session_runs.append(row)
+        self.session_runs = self.session_runs[-500:]
+        save_session_runs(self.session_runs)
 
     @staticmethod
-    def _format_full_table_run_line(run):
-        """Une ligne lisible pour le panneau d’accueil."""
+    def _format_session_run_summary_line(run):
+        """Résumé d’une session pour l’accueil ou la liste stats."""
         mois = (
             "janv.", "févr.", "mars", "avr.", "mai", "juin",
             "juil.", "août", "sept.", "oct.", "nov.", "déc.",
@@ -1353,12 +1445,15 @@ class QuizApp(tk.Tk):
         err = int(run.get("errors", 0))
         fc = bool(run.get("flashcard", False))
         mode_lbl = "flashcards" if fc else "quiz"
+        kind_fr = SESSION_KIND_LABELS_FR.get(
+            str(run.get("kind", "")), str(run.get("kind", "")),
+        )
         return (
-            f"{date_s} · {mode_lbl} · {d:.0f}s · {sc}/{tq} · {err} erreur(s)"
+            f"{date_s} · {kind_fr} · {mode_lbl} · {d:.0f}s · {sc}/{tq} · {err} err."
         )
 
     def _build_full_table_runs_home_panel(self, parent):
-        """Résumé + import/export sous le bouton « Toute la table »."""
+        """Résumé des dernières sessions « Toute la table » (détail dans Statistiques)."""
         box = tk.Frame(parent, bg=BG_DARK)
         box.pack(fill="x", pady=(10, 4))
         inner = self.make_card(box, padx=12, pady=10)
@@ -1368,7 +1463,8 @@ class QuizApp(tk.Tk):
             text="Dernières sessions « Toute la table »",
             font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_ACCENT,
         ).pack(anchor="w")
-        runs = list(reversed(self.full_table_runs[-5:]))
+        ft_runs = [r for r in self.session_runs if r.get("kind") == "full_table"]
+        runs = list(reversed(ft_runs[-5:]))
         if not runs:
             tk.Label(
                 inner,
@@ -1380,48 +1476,66 @@ class QuizApp(tk.Tk):
             for run in runs:
                 tk.Label(
                     inner,
-                    text=self._format_full_table_run_line(run),
+                    text=self._format_session_run_summary_line(run),
                     font=FONT_SMALL, bg=BG_CARD, fg=FG_PRIMARY,
                     wraplength=520, justify="left",
                 ).pack(anchor="w", pady=(2, 0))
-        row = tk.Frame(inner, bg=BG_CARD)
-        row.pack(fill="x", pady=(8, 0))
-        self.make_button(
-            row, "📤 Exporter…", self._export_full_table_runs_file, width=14,
-        ).pack(side="left", padx=(0, 8))
-        self.make_button(
-            row, "📥 Importer…", self._import_full_table_runs_file, width=14,
-        ).pack(side="left", padx=0)
+        tk.Label(
+            inner,
+            text="Historique complet : menu Statistiques → onglet « Sessions ».",
+            font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
+            wraplength=520, justify="left",
+        ).pack(anchor="w", pady=(6, 0))
 
-    def _export_full_table_runs_file(self):
+    def _build_full_backup_payload(self):
+        """Données pour une sauvegarde JSON complète."""
+        return {
+            "mnemos_full_backup_version": FULL_BACKUP_VERSION,
+            "app": APP_NAME,
+            "app_version": VERSION,
+            "table": [[n, m] for n, m in self.table],
+            "stats": {
+                _stats_key(n, m): [
+                    int(v[0]), int(v[1]), float(v[2]), float(v[3]),
+                ]
+                for (n, m), v in self.stats.items()
+            },
+            "preferences": {
+                k: int(self.preferences.get(k, DEFAULT_PREFERENCES[k]))
+                for k in DEFAULT_PREFERENCES
+            },
+            "weekly_plan": list(load_weekly_plan_days()),
+            "manual_weak": sorted([list(p) for p in self.manual_weak]),
+            "session_runs": list(self.session_runs),
+        }
+
+    def _export_full_backup_file(self):
         path = filedialog.asksaveasfilename(
             parent=self,
-            title="Exporter l’historique « Toute la table »",
+            title="Exporter une sauvegarde complète",
             defaultextension=".json",
-            filetypes=[("JSON", "*.json")],
+            filetypes=[("JSON Mnemos", "*.json")],
         )
         if not path:
             return
-        payload = {
-            "mnemos_full_table_runs_version": FULL_TABLE_RUNS_VERSION,
-            "runs": list(self.full_table_runs),
-        }
         try:
+            payload = self._build_full_backup_payload()
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
             messagebox.showinfo(
                 "Export réussi",
-                f"{len(self.full_table_runs)} session(s) enregistrée(s) dans :\n{path}",
+                "Sauvegarde enregistrée (table, stats, plan, préférences, "
+                f"points faibles, {len(self.session_runs)} session(s)) :\n{path}",
             )
         except OSError as e:
             messagebox.showerror("Export", str(e))
 
-    def _import_full_table_runs_file(self):
+    def _import_full_backup_file(self):
         path = filedialog.askopenfilename(
             parent=self,
-            title="Importer un historique « Toute la table »",
+            title="Importer une sauvegarde",
             filetypes=[("JSON", "*.json"), ("Tous les fichiers", "*.*")],
         )
         if not path:
@@ -1432,41 +1546,117 @@ class QuizApp(tk.Tk):
         except (OSError, json.JSONDecodeError) as e:
             messagebox.showerror("Import", str(e))
             return
-        raw = []
-        if isinstance(data, list):
-            raw = data
-        elif isinstance(data, dict) and isinstance(data.get("runs"), list):
-            raw = data["runs"]
-        incoming = []
-        for item in raw:
-            row = _normalize_full_table_run(item)
-            if row:
-                incoming.append(row)
-        if not incoming:
-            messagebox.showerror(
-                "Import",
-                "Aucune session valide dans ce fichier.",
-            )
+        if not isinstance(data, dict):
+            messagebox.showerror("Import", "Format JSON invalide.")
             return
-        merge = messagebox.askyesno(
-            "Importer",
-            f"{len(incoming)} session(s) valide(s).\n\n"
-            "Oui = fusionner avec l’historique actuel.\n"
-            "Non = remplacer tout l’historique par ce fichier.",
+        if int(data.get("mnemos_full_backup_version", 0)) >= 1:
+            if not messagebox.askyesno(
+                "Restaurer la sauvegarde",
+                "Remplacer sur ce Mac : la table, les stats, le plan hebdomadaire, "
+                "les préférences, les points faibles manuels et l’historique des "
+                "sessions par le contenu de ce fichier ?\n\n"
+                "Cette action ne peut pas être annulée (pense à exporter d’abord "
+                "une copie si tu veux conserver l’état actuel).",
+            ):
+                return
+            try:
+                rows = data.get("table")
+                if not isinstance(rows, list):
+                    raise ValueError("Champ « table » manquant ou invalide.")
+                new_table = _sort_table_pairs(_pairs_from_json_rows(rows))
+                st = data.get("stats")
+                if isinstance(st, dict) and st:
+                    norm_map = _norm_map_from_stats_json_obj(st)
+                else:
+                    norm_map = None
+                merged = merged_stats_for_imported_table(
+                    new_table, norm_map, self.stats,
+                )
+                self.table = new_table
+                self.stats = merged
+                prefs = data.get("preferences")
+                out = dict(DEFAULT_PREFERENCES)
+                if isinstance(prefs, dict):
+                    for k in DEFAULT_PREFERENCES:
+                        if k in prefs:
+                            try:
+                                out[k] = max(
+                                    0, min(120_000, int(prefs[k])),
+                                )
+                            except (TypeError, ValueError):
+                                pass
+                self.preferences = save_preferences(out)
+                wp = data.get("weekly_plan")
+                if isinstance(wp, list) and len(wp) >= 7:
+                    save_weekly_plan_days(
+                        [str(wp[i]).strip() for i in range(7)],
+                    )
+                else:
+                    save_weekly_plan_days(list(DEFAULT_WEEKLY_PLAN_DAYS))
+                mw = data.get("manual_weak")
+                valid = {(n, m) for n, m in new_table}
+                if isinstance(mw, list):
+                    s = set()
+                    for item in mw:
+                        if isinstance(item, (list, tuple)) and len(item) >= 2:
+                            p = (str(item[0]).strip(), str(item[1]).strip())
+                            if p in valid:
+                                s.add(p)
+                    self.manual_weak = save_manual_weak_set(s, new_table)
+                else:
+                    self.manual_weak = save_manual_weak_set(set(), new_table)
+                sr = data.get("session_runs")
+                new_runs = []
+                if isinstance(sr, list):
+                    for item in sr:
+                        row = _normalize_session_run(item)
+                        if row:
+                            new_runs.append(row)
+                self.session_runs = new_runs[-500:]
+                save_session_runs(self.session_runs)
+                self._persist_table()
+            except (ValueError, TypeError, KeyError) as e:
+                messagebox.showerror("Import", str(e))
+                return
+            messagebox.showinfo("Import", "Sauvegarde restaurée.")
+            self.show_main_menu()
+            return
+        if int(data.get("mnemos_export_version", 0)) >= 2 and "table" in data:
+            if not messagebox.askyesno(
+                "Fichier table + stats",
+                "Ce fichier est une exportation « table + stats » seulement "
+                "(sans plan ni historique de sessions). Importer uniquement la "
+                "table et les statistiques ?",
+            ):
+                return
+            try:
+                new_table, norm_stats_map = parse_imported_table_file(path)
+            except (OSError, json.JSONDecodeError, ValueError) as e:
+                messagebox.showerror("Import", str(e))
+                return
+            new_table = _sort_table_pairs(list(new_table))
+            merged = merged_stats_for_imported_table(
+                new_table, norm_stats_map, self.stats,
+            )
+            self.table = new_table
+            self.stats = merged
+            self.manual_weak = save_manual_weak_set(
+                {p for p in self.manual_weak if p in set(new_table)},
+                new_table,
+            )
+            self._persist_table()
+            messagebox.showinfo(
+                "Import",
+                f"{len(new_table)} paires et stats mises à jour.",
+            )
+            self.show_main_menu()
+            return
+        messagebox.showerror(
+            "Import",
+            "Fichier non reconnu : attendu une sauvegarde complète "
+            f"(mnemos_full_backup_version ≥ {FULL_BACKUP_VERSION}) ou un export "
+            f"table Mnemos (mnemos_export_version ≥ {TABLE_EXPORT_VERSION}).",
         )
-        if merge:
-            seen = {r.get("at") for r in self.full_table_runs}
-            for r in incoming:
-                if r["at"] not in seen:
-                    self.full_table_runs.append(r)
-                    seen.add(r["at"])
-            self.full_table_runs.sort(key=lambda x: str(x.get("at", "")))
-            self.full_table_runs = self.full_table_runs[-200:]
-        else:
-            self.full_table_runs = incoming[-200:]
-        save_full_table_runs(self.full_table_runs)
-        messagebox.showinfo("Import", "Historique mis à jour.")
-        self.show_main_menu()
 
     @staticmethod
     def _bind_mousewheel(widget):
@@ -1607,16 +1797,16 @@ class QuizApp(tk.Tk):
         io_row = tk.Frame(self.container, bg=BG_DARK)
         io_row.pack(pady=(0, 4))
         self.make_button(
-            io_row, "📤  Exporter la table…", self._export_table_file, width=22,
+            io_row,
+            "📤  Exporter tout (sauvegarde)…",
+            self._export_full_backup_file,
+            width=28,
         ).pack(side="left", padx=5)
         self.make_button(
-            io_row, "📥  Importer une table…", self._import_table_file, width=22,
-        ).pack(side="left", padx=5)
-        self.make_button(
-            io_row, "📤  Exporter le plan…", self._export_weekly_plan_file, width=20,
-        ).pack(side="left", padx=5)
-        self.make_button(
-            io_row, "📥  Importer le plan…", self._import_weekly_plan_file, width=20,
+            io_row,
+            "📥  Importer tout (restauration)…",
+            self._import_full_backup_file,
+            width=30,
         ).pack(side="left", padx=5)
 
         # Pied : logo en bas à gauche (clic = À propos) · raccourcis · mise à jour
@@ -2218,7 +2408,9 @@ class QuizApp(tk.Tk):
             )
             return
         self._build_questions(
-            pairs, use_flashcard=self.session_flashcard_var.get(),
+            pairs,
+            use_flashcard=self.session_flashcard_var.get(),
+            session_kind="bloc",
         )
 
     def _start_quiz_odd_numbers(self):
@@ -2234,7 +2426,9 @@ class QuizApp(tk.Tk):
             )
             return
         self._build_questions(
-            pairs, use_flashcard=self.session_flashcard_var.get(),
+            pairs,
+            use_flashcard=self.session_flashcard_var.get(),
+            session_kind="bloc",
         )
 
     def _add_direction_picker(self, parent):
@@ -2269,7 +2463,9 @@ class QuizApp(tk.Tk):
                                    "Aucune correspondance pour ces blocs.")
             return
         self._build_questions(
-            pairs, use_flashcard=self.session_flashcard_var.get(),
+            pairs,
+            use_flashcard=self.session_flashcard_var.get(),
+            session_kind="bloc",
         )
 
     # --------------------------------------------------------
@@ -2298,7 +2494,9 @@ class QuizApp(tk.Tk):
             )
             return
         self._build_questions(
-            pool, use_flashcard=self.session_flashcard_var.get(),
+            pool,
+            use_flashcard=self.session_flashcard_var.get(),
+            session_kind="focus",
         )
 
     def start_random_mode(self):
@@ -2364,7 +2562,9 @@ class QuizApp(tk.Tk):
             return
         pairs = [random.choice(self.table) for _ in range(nq)]
         self._build_questions(
-            pairs, use_flashcard=self.session_flashcard_var.get(),
+            pairs,
+            use_flashcard=self.session_flashcard_var.get(),
+            session_kind="random",
         )
 
     def start_full_mode(self):
@@ -2424,7 +2624,7 @@ class QuizApp(tk.Tk):
             list(self.table),
             shuffle_questions=shuffle_q,
             use_flashcard=self.session_flashcard_var.get(),
-            session_tag="full_table",
+            session_kind="full_table",
         )
 
     def _show_sens_then_start(self, callback):
@@ -2481,7 +2681,7 @@ class QuizApp(tk.Tk):
         shuffle_questions=True,
         *,
         use_flashcard=False,
-        session_tag=None,
+        session_kind="bloc",
     ):
         sens = self.sens_var.get()
         if not shuffle_questions:
@@ -2494,7 +2694,8 @@ class QuizApp(tk.Tk):
                 self.questions.append(("mot->nombre", nombre, mot))
         if shuffle_questions:
             random.shuffle(self.questions)
-        self._session_tag = session_tag
+        sk = session_kind if session_kind in _VALID_SESSION_KINDS else "bloc"
+        self._session_kind = sk
         self._quiz_is_flashcard = use_flashcard
         self.current_q = 0
         self.score = 0
@@ -2808,10 +3009,14 @@ class QuizApp(tk.Tk):
         total_q = len(self.questions)
         pct = (self.score / total_q * 100) if total_q else 0
 
-        if getattr(self, "_session_tag", None) == "full_table":
+        if total_q > 0:
             err_count = sum(1 for r in self.results if not r[4])
-            self._record_full_table_run(
-                total_q, self.score, err_count, total_time, False,
+            self._record_session_run(
+                total_q=total_q,
+                score=self.score,
+                errors_count=err_count,
+                duration_s=total_time,
+                flashcard=False,
             )
 
         tk.Label(
@@ -2900,7 +3105,7 @@ class QuizApp(tk.Tk):
 
     def _requiz_errors(self, errors):
         """Relance un quiz uniquement sur les erreurs."""
-        self._session_tag = None
+        self._session_kind = "errors_review"
         self.questions = [
             (mode, nombre, mot) for mode, nombre, mot, _, _, _ in errors
         ]
@@ -3127,10 +3332,14 @@ class QuizApp(tk.Tk):
         total = len(self.fc_cards)
         good = self.fc_score
         total_s = time.time() - getattr(self, "fc_quiz_start", time.time())
-        if getattr(self, "_session_tag", None) == "full_table":
+        if total > 0:
             err_count = sum(1 for r in self.fc_results if not r[4])
-            self._record_full_table_run(
-                total, good, err_count, total_s, True,
+            self._record_session_run(
+                total_q=total,
+                score=good,
+                errors_count=err_count,
+                duration_s=total_s,
+                flashcard=True,
             )
         tk.Label(
             self.container, text="🃏 Session terminée", font=FONT_TITLE,
@@ -3169,72 +3378,122 @@ class QuizApp(tk.Tk):
             self.container, text="📊 Statistiques", font=FONT_TITLE,
             bg=BG_DARK, fg=FG_ACCENT,
         ).pack(pady=(20, 5))
-        tk.Label(
-            self.container,
-            text="Temps moyen (s) : par lettre du mot (N→M) et par chiffre du "
-                 "nombre (M→N). Colonne # = position dans la table de rappel. "
-                 "Clique sur un en-tête pour trier ; un second clic inverse.",
-            font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY, wraplength=720,
-        ).pack(pady=(0, 8))
 
-        # Tabs + actions
-        tab_frame = tk.Frame(self.container, bg=BG_DARK)
-        tab_frame.pack(fill="x", padx=40, pady=(0, 5))
+        main_tf = tk.Frame(self.container, bg=BG_DARK)
+        main_tf.pack(fill="x", padx=40, pady=(0, 6))
 
-        current_tab = (
-            self._stats_sort_tab
-            if self._stats_sort_column == "total"
-            else None
-        )
-
-        def make_tab(text, val):
-            is_active = current_tab == val
-            bg = TAB_ACTIVE_BG if is_active else BG_DARK
-            fg = TAB_ACTIVE_FG if is_active else FG_SECONDARY
-            btn = tk.Label(
-                tab_frame, text=text, font=FONT_BODY_BOLD,
-                bg=bg, fg=fg, cursor="hand2", padx=15, pady=6,
-                relief="flat",
+        def main_tab_lbl(text, val):
+            act = self._stats_main_tab == val
+            bg = TAB_ACTIVE_BG if act else BG_DARK
+            fg = TAB_ACTIVE_FG if act else FG_SECONDARY
+            lb = tk.Label(
+                main_tf, text=text, font=FONT_BODY_BOLD,
+                bg=bg, fg=fg, cursor="hand2", padx=14, pady=5,
             )
-            btn.pack(side="left", padx=(0, 2))
-            if is_active:
-                underline = tk.Frame(tab_frame, bg=FG_ACCENT, height=3)
-                underline.pack(side="left", fill="x", padx=(0, 2))
-            btn.bind("<Button-1>", lambda e: self._switch_stats_tab(val))
-            btn.bind("<Enter>", lambda e: btn.configure(
-                bg=TAB_ACTIVE_BG if not is_active else bg))
-            btn.bind("<Leave>", lambda e: btn.configure(bg=bg))
+            lb.pack(side="left", padx=(0, 8))
+            lb.bind(
+                "<Button-1>",
+                lambda e, v=val: self._switch_stats_main_tab(v),
+            )
+            lb.bind("<Enter>", lambda e, l=lb, a=act: l.configure(
+                bg=TAB_ACTIVE_BG if not a else l.cget("bg")))
+            lb.bind("<Leave>", lambda e, l=lb, b=bg: l.configure(bg=b))
 
-        make_tab("🔻 Moins connus", "worst")
-        make_tab("🔺 Plus connus", "best")
-        tk.Label(
-            tab_frame,
-            text="(Onglets = tri par score total · autres colonnes = tri libre)",
-            font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
-        ).pack(side="left", padx=(12, 0))
+        main_tab_lbl("Par paire", "pairs")
+        main_tab_lbl("Sessions (temps, score, erreurs)", "sessions")
 
-        reset_btn = tk.Label(
-            tab_frame, text="🗑 Tout à zéro", font=FONT_SMALL,
-            bg=BG_DARK, fg=FG_RED, cursor="hand2", padx=10,
-        )
-        reset_btn.pack(side="right")
-        reset_btn.bind("<Button-1>", lambda e: self._confirm_reset_stats())
+        if self._stats_main_tab == "pairs":
+            tk.Label(
+                self.container,
+                text="Temps moyen (s) : par lettre du mot (N→M) et par chiffre du "
+                     "nombre (M→N). Colonne # = position dans la table de rappel. "
+                     "Clique sur un en-tête pour trier ; un second clic inverse.",
+                font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY, wraplength=720,
+            ).pack(pady=(0, 8))
 
-        sync_btn = tk.Label(
-            tab_frame, text="↻ Sync table", font=FONT_SMALL,
-            bg=BG_DARK, fg=FG_ACCENT, cursor="hand2", padx=10,
-        )
-        sync_btn.pack(side="right", padx=(0, 4))
-        sync_btn.bind("<Button-1>", lambda e: self._sync_stats_to_table())
+            tab_frame = tk.Frame(self.container, bg=BG_DARK)
+            tab_frame.pack(fill="x", padx=40, pady=(0, 5))
 
-        # Liste
-        self.stats_list_frame = tk.Frame(self.container, bg=BG_DARK)
-        self.stats_list_frame.pack(fill="both", expand=True, padx=40, pady=5)
-        self._render_stats_list()
+            current_tab = (
+                self._stats_sort_tab
+                if self._stats_sort_column == "total"
+                else None
+            )
+
+            def make_tab(text, val):
+                is_active = current_tab == val
+                bg = TAB_ACTIVE_BG if is_active else BG_DARK
+                fg = TAB_ACTIVE_FG if is_active else FG_SECONDARY
+                btn = tk.Label(
+                    tab_frame, text=text, font=FONT_BODY_BOLD,
+                    bg=bg, fg=fg, cursor="hand2", padx=15, pady=6,
+                    relief="flat",
+                )
+                btn.pack(side="left", padx=(0, 2))
+                if is_active:
+                    tk.Frame(tab_frame, bg=FG_ACCENT, height=3).pack(
+                        side="left", fill="x", padx=(0, 2),
+                    )
+                btn.bind("<Button-1>", lambda e: self._switch_stats_tab(val))
+                btn.bind("<Enter>", lambda e, b=btn, ia=is_active: b.configure(
+                    bg=TAB_ACTIVE_BG if not ia else b.cget("bg")))
+                btn.bind("<Leave>", lambda e, b=btn, bg_=bg: b.configure(bg=bg_))
+
+            make_tab("🔻 Moins connus", "worst")
+            make_tab("🔺 Plus connus", "best")
+            tk.Label(
+                tab_frame,
+                text="(Tri par score total · autres colonnes = tri libre)",
+                font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
+            ).pack(side="left", padx=(12, 0))
+
+            reset_btn = tk.Label(
+                tab_frame, text="🗑 Tout à zéro", font=FONT_SMALL,
+                bg=BG_DARK, fg=FG_RED, cursor="hand2", padx=10,
+            )
+            reset_btn.pack(side="right")
+            reset_btn.bind("<Button-1>", lambda e: self._confirm_reset_stats())
+
+            sync_btn = tk.Label(
+                tab_frame, text="↻ Sync table", font=FONT_SMALL,
+                bg=BG_DARK, fg=FG_ACCENT, cursor="hand2", padx=10,
+            )
+            sync_btn.pack(side="right", padx=(0, 4))
+            sync_btn.bind("<Button-1>", lambda e: self._sync_stats_to_table())
+
+            self.stats_list_frame = tk.Frame(self.container, bg=BG_DARK)
+            self.stats_list_frame.pack(fill="both", expand=True, padx=40, pady=5)
+            self._render_stats_list()
+        else:
+            tk.Label(
+                self.container,
+                text="Chaque session terminée enregistre la durée totale, le score, "
+                     "les erreurs et le mode (dont « Toute la table »). Les lignes "
+                     "sont triées du plus récent au plus ancien.",
+                font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY, wraplength=720,
+            ).pack(pady=(0, 8))
+            self.stats_list_frame = tk.Frame(self.container, bg=BG_DARK)
+            self.stats_list_frame.pack(fill="both", expand=True, padx=40, pady=5)
+            self._render_session_runs_list()
+
+        io = tk.Frame(self.container, bg=BG_DARK)
+        io.pack(pady=(4, 2))
+        self.make_button(
+            io, "📤  Exporter sauvegarde complète…",
+            self._export_full_backup_file, width=28,
+        ).pack(side="left", padx=6)
+        self.make_button(
+            io, "📥  Importer sauvegarde complète…",
+            self._import_full_backup_file, width=30,
+        ).pack(side="left", padx=6)
 
         self.make_button(
             self.container, "⬅  Retour au menu", self.show_main_menu,
         ).pack(pady=(5, 15))
+
+    def _switch_stats_main_tab(self, tab):
+        self._stats_main_tab = tab
+        self.show_stats_view()
 
     def _confirm_reset_stats(self):
         if messagebox.askyesno(
@@ -3432,6 +3691,99 @@ class QuizApp(tk.Tk):
                 lambda e, p=(nombre, mot): self._clear_stats_one_pair(p),
             )
 
+    def _render_session_runs_list(self):
+        for w in self.stats_list_frame.winfo_children():
+            w.destroy()
+
+        canvas = tk.Canvas(self.stats_list_frame, bg=BG_DARK,
+                           highlightthickness=0)
+        scrollbar = ttk.Scrollbar(
+            self.stats_list_frame, orient="vertical", command=canvas.yview,
+        )
+        inner = tk.Frame(canvas, bg=BG_DARK)
+        inner.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self._bind_mousewheel(canvas)
+
+        hdr = tk.Frame(inner, bg=BTN_BG, pady=5)
+        hdr.pack(fill="x", pady=(0, 4))
+        for title, w in (
+            ("Date / heure", 20),
+            ("Mode", 14),
+            ("Durée (s)", 9),
+            ("Score", 10),
+            ("Err.", 5),
+            ("Type", 9),
+        ):
+            tk.Label(
+                hdr, text=title, font=FONT_SMALL, bg=BTN_BG,
+                fg=FG_ACCENT, width=w, anchor="w",
+            ).pack(side="left", padx=2)
+
+        ordered = list(reversed(self.session_runs))
+        if not ordered:
+            tk.Label(
+                inner,
+                text="Aucune session enregistrée pour l’instant.",
+                font=FONT_BODY, bg=BG_DARK, fg=FG_SECONDARY,
+            ).pack(anchor="w", pady=20)
+            return
+
+        for i, run in enumerate(ordered):
+            row_bg = BG_CARD if i % 2 == 0 else BG_CARD_HOVER
+            row = tk.Frame(inner, bg=row_bg, pady=3)
+            row.pack(fill="x", pady=1)
+            try:
+                dt = datetime.datetime.fromisoformat(str(run.get("at", "")))
+                date_s = (
+                    f"{dt.day:02d}/{dt.month:02d}/{dt.year} "
+                    f"{dt.hour:02d}:{dt.minute:02d}"
+                )
+            except (TypeError, ValueError):
+                date_s = str(run.get("at", ""))[:16]
+            kind_fr = SESSION_KIND_LABELS_FR.get(
+                str(run.get("kind", "")), str(run.get("kind", "")),
+            )
+            d = float(run.get("duration_s", 0))
+            tq = max(1, int(run.get("total_q", 0)))
+            sc = int(run.get("score", 0))
+            err = int(run.get("errors", 0))
+            fc = bool(run.get("flashcard", False))
+            typ = "Flashcards" if fc else "Quiz saisi"
+            extra = ""
+            if run.get("kind") == "full_table" and run.get("shuffle") is not None:
+                extra = " · mélangé" if run.get("shuffle") else " · ordre"
+            tk.Label(
+                row, text=date_s, font=FONT_SMALL, bg=row_bg,
+                fg=FG_PRIMARY, width=20, anchor="w",
+            ).pack(side="left", padx=2)
+            tk.Label(
+                row, text=kind_fr + extra, font=FONT_SMALL, bg=row_bg,
+                fg=FG_SECONDARY, width=14, anchor="w", wraplength=120,
+            ).pack(side="left", padx=2)
+            tk.Label(
+                row, text=f"{d:.1f}", font=FONT_SMALL, bg=row_bg,
+                fg=FG_ORANGE, width=9, anchor="w",
+            ).pack(side="left", padx=2)
+            tk.Label(
+                row, text=f"{sc}/{tq}", font=FONT_SMALL, bg=row_bg,
+                fg=FG_GREEN, width=10, anchor="w",
+            ).pack(side="left", padx=2)
+            tk.Label(
+                row, text=str(err), font=FONT_SMALL, bg=row_bg,
+                fg=FG_RED if err else FG_SECONDARY, width=5, anchor="w",
+            ).pack(side="left", padx=2)
+            tk.Label(
+                row, text=typ, font=FONT_SMALL, bg=row_bg,
+                fg=FG_SECONDARY, width=9, anchor="w",
+            ).pack(side="left", padx=2)
+
     # --------------------------------------------------------
     # Écran : Parcourir la table
     # --------------------------------------------------------
@@ -3488,10 +3840,10 @@ class QuizApp(tk.Tk):
             btn_bar, "✏️  Modifier la table", self._show_edit_table,
         ).pack(side="left", padx=5)
         self.make_button(
-            btn_bar, "📤  Exporter…", self._export_table_file,
+            btn_bar, "📤  Exporter tout…", self._export_full_backup_file,
         ).pack(side="left", padx=5)
         self.make_button(
-            btn_bar, "📥  Importer…", self._import_table_file,
+            btn_bar, "📥  Importer tout…", self._import_full_backup_file,
         ).pack(side="left", padx=5)
 
     def _persist_weak_toggle(self, pair, enabled):
@@ -3714,10 +4066,10 @@ class QuizApp(tk.Tk):
             accent=True,
         ).pack(side="left", padx=5)
         self.make_button(
-            btn_frame, "📤  Exporter…", self._export_table_file,
+            btn_frame, "📤  Exporter tout…", self._export_full_backup_file,
         ).pack(side="left", padx=5)
         self.make_button(
-            btn_frame, "📥  Importer…", self._import_table_file,
+            btn_frame, "📥  Importer tout…", self._import_full_backup_file,
         ).pack(side="left", padx=5)
         self.make_button(
             btn_frame, "⬅  Retour à la table", self.show_table_view,
