@@ -16,6 +16,10 @@ class TableBrowseMixin:
         search_frame = tk.Frame(self.container, bg=BG_DARK)
         search_frame.pack(fill="x", padx=60, pady=(0, 8))
 
+        tk.Label(
+            search_frame, text="Rechercher :", font=FONT_BODY_BOLD,
+            bg=BG_DARK, fg=FG_PRIMARY,
+        ).pack(side="left", padx=(0, 8))
         tk.Label(search_frame, text="🔍", font=FONT_BODY,
                  bg=BG_DARK, fg=FG_SECONDARY).pack(side="left", padx=(0, 5))
         self.search_var = tk.StringVar()
@@ -23,9 +27,12 @@ class TableBrowseMixin:
         search_entry = tk.Entry(
             search_frame, textvariable=self.search_var,
             font=FONT_BODY, bg=BG_INPUT, fg=FG_PRIMARY,
-            insertbackground=FG_PRIMARY, relief="flat", width=30,
+            insertbackground=FG_PRIMARY, relief="flat", width=28,
         )
         search_entry.pack(side="left", ipady=4)
+        self.make_button(
+            search_frame, "Filtrer", self._filter_table, width=12,
+        ).pack(side="left", padx=(10, 0))
         search_entry.focus_set()
 
         # Légende
@@ -54,12 +61,6 @@ class TableBrowseMixin:
         ).pack(side="left", padx=5)
         self.make_button(
             btn_bar, "✏️  Modifier la table", self._show_edit_table,
-        ).pack(side="left", padx=5)
-        self.make_button(
-            btn_bar, "📤  Exporter tout…", self._export_full_backup_file,
-        ).pack(side="left", padx=5)
-        self.make_button(
-            btn_bar, "📥  Importer tout…", self._import_full_backup_file,
         ).pack(side="left", padx=5)
 
     def _persist_weak_toggle(self, pair, enabled):

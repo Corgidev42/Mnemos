@@ -136,12 +136,6 @@ class TableEditMixin:
             accent=True,
         ).pack(side="left", padx=5)
         self.make_button(
-            btn_frame, "📤  Exporter tout…", self._export_full_backup_file,
-        ).pack(side="left", padx=5)
-        self.make_button(
-            btn_frame, "📥  Importer tout…", self._import_full_backup_file,
-        ).pack(side="left", padx=5)
-        self.make_button(
             btn_frame, "⬅  Retour à la table", self.show_table_view,
         ).pack(side="left", padx=5)
 

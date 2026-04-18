@@ -109,17 +109,6 @@ class StatsMixin:
             self.stats_list_frame.pack(fill="both", expand=True, padx=40, pady=5)
             self._render_session_runs_list()
 
-        io = tk.Frame(self.container, bg=BG_DARK)
-        io.pack(pady=(4, 2))
-        self.make_button(
-            io, "📤  Exporter sauvegarde complète…",
-            self._export_full_backup_file, width=28,
-        ).pack(side="left", padx=6)
-        self.make_button(
-            io, "📥  Importer sauvegarde complète…",
-            self._import_full_backup_file, width=30,
-        ).pack(side="left", padx=6)
-
         self.make_button(
             self.container, "⬅  Retour au menu", self.show_main_menu,
         ).pack(pady=(5, 15))
