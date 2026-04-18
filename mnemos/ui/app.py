@@ -81,6 +81,7 @@ class QuizApp(
 
         # Démarrer avec le menu
         self.show_main_menu()
+
     def _on_quit(self):
         """Sauvegarde les stats avant de fermer."""
         try:
@@ -99,82 +100,6 @@ class QuizApp(
             self._auto_advance_id = None
         for w in self.container.winfo_children():
             w.destroy()
-    def _add_flashcard_option(self, parent, *, bg=BG_CARD):
-        """Case à cocher : session en flashcards au lieu du quiz saisi."""
-        tk.Checkbutton(
-            parent,
-            text="  Mode flashcards (retourner la carte, auto-évaluation)",
-            variable=self.session_flashcard_var,
-            font=FONT_BODY_BOLD, bg=bg, fg=FG_PRIMARY,
-            selectcolor=CHECK_BG, activebackground=bg,
-            activeforeground=CHECK_ON, highlightthickness=0,
-            anchor="w",
-        ).pack(anchor="w", pady=(12, 4))
-
-    def _launch_flashcard_from_questions(self):
-        """Démarre une session flashcard à partir de self.questions déjà construite."""
-        self.fc_cards = list(self.questions)
-        self.fc_idx = 0
-        self.fc_revealed = False
-        self.fc_score = 0
-        self.fc_streak = 0
-        self.fc_best_streak = 0
-        self.fc_results = []
-        self.fc_quiz_start = time.time()
-        self._show_flashcard()
-
-    def _record_session_run(
-        self, *, total_q, score, errors_count, duration_s, flashcard,
-    ):
-        """Enregistre une session terminée (temps, score, erreurs, mode)."""
-        if total_q <= 0:
-            return
-        kind = getattr(self, "_session_kind", None) or "bloc"
-        if kind not in _VALID_SESSION_KINDS:
-            kind = "bloc"
-        meta = getattr(self, "_full_table_meta", None) or {}
-        run = {
-            "at": datetime.datetime.now().replace(microsecond=0).isoformat(),
-            "kind": kind,
-            "duration_s": round(float(duration_s), 1),
-            "total_q": int(total_q),
-            "score": int(score),
-            "errors": int(errors_count),
-            "flashcard": bool(flashcard),
-            "sens": str(meta.get("sens", "")),
-            "shuffle": bool(meta.get("shuffle", False)),
-        }
-        row = _normalize_session_run(run)
-        if not row:
-            return
-        self.session_runs.append(row)
-        self.session_runs = self.session_runs[-500:]
-        save_session_runs(self.session_runs)
-
-    @staticmethod
-    def _format_session_run_summary_line(run):
-        """Résumé d’une session pour l’accueil ou la liste stats."""
-        mois = (
-            "janv.", "févr.", "mars", "avr.", "mai", "juin",
-            "juil.", "août", "sept.", "oct.", "nov.", "déc.",
-        )
-        try:
-            dt = datetime.datetime.fromisoformat(str(run.get("at", "")))
-            date_s = f"{dt.day} {mois[dt.month - 1]} {dt.year}, {dt.hour:02d}:{dt.minute:02d}"
-        except (TypeError, ValueError):
-            date_s = str(run.get("at", ""))[:19]
-        d = float(run.get("duration_s", 0))
-        tq = int(run.get("total_q", 0))
-        sc = int(run.get("score", 0))
-        err = int(run.get("errors", 0))
-        fc = bool(run.get("flashcard", False))
-        mode_lbl = "flashcards" if fc else "quiz"
-        kind_fr = SESSION_KIND_LABELS_FR.get(
-            str(run.get("kind", "")), str(run.get("kind", "")),
-        )
-        return (
-            f"{date_s} · {kind_fr} · {mode_lbl} · {d:.0f}s · {sc}/{tq} · {err} err."
-        )
 
 
 def run_app():
