@@ -131,31 +131,38 @@ class HomeMixin:
             width=30,
         ).pack(side="left", padx=5)
 
-        # Pied : logo en bas à gauche (clic = À propos) · raccourcis · mise à jour
+        # Pied : logo en bas à gauche (clic = À propos) · raccourcis + MAJ centrés
         footer_row = tk.Frame(self.container, bg=BG_DARK)
         footer_row.pack(side="bottom", fill="x", padx=12, pady=(0, 10))
+        footer_row.columnconfigure(1, weight=1)
 
         logo_img = _load_logo_photo(52)
         if logo_img:
             self._logo_ref = logo_img
             logo_lbl = tk.Label(footer_row, image=logo_img, bg=BG_DARK)
-            logo_lbl.pack(side="left", anchor="w")
+            logo_lbl.grid(row=0, column=0, sticky="nw")
             logo_lbl.bind("<Button-1>", lambda e: self._show_about())
             logo_lbl.config(cursor="hand2")
 
-        right_foot = tk.Frame(footer_row, bg=BG_DARK)
-        right_foot.pack(side="right")
-        upd_lbl = tk.Label(
-            right_foot, text="🔄 Vérifier les mises à jour",
-            font=FONT_SMALL, bg=BG_DARK, fg=FG_ACCENT, cursor="hand2",
+        center_foot = tk.Frame(footer_row, bg=BG_DARK)
+        center_foot.grid(
+            row=0, column=1, sticky="ew", padx=(8, 0) if logo_img else (0, 0),
         )
-        upd_lbl.pack(side="right", padx=(12, 0))
-        upd_lbl.bind("<Button-1>", lambda e: self._check_update())
+        inner = tk.Frame(center_foot, bg=BG_DARK)
+        inner.pack(fill="x", expand=True)
+        sub = tk.Frame(inner, bg=BG_DARK)
+        sub.pack(anchor="center")
         tk.Label(
-            right_foot,
+            sub,
             text="Raccourcis : 1-5 = modes · P = conseil · Échap = menu · Entrée = valider",
             font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
-        ).pack(side="right")
+        ).pack(side="left")
+        upd_lbl = tk.Label(
+            sub, text="🔄 Vérifier les mises à jour",
+            font=FONT_SMALL, bg=BG_DARK, fg=FG_ACCENT, cursor="hand2",
+        )
+        upd_lbl.pack(side="left", padx=(12, 0))
+        upd_lbl.bind("<Button-1>", lambda e: self._check_update())
 
     def _open_weekly_plan_pdf(self):
         """Ouvre le PDF du plan de révision dans l’application par défaut (Aperçu, etc.)."""
