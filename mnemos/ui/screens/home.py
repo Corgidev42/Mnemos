@@ -72,6 +72,7 @@ class HomeMixin:
             ("2", "🎯  Focus points faibles", self.start_focus_mode),
             ("3", "🎲  Quiz aléatoire", self.start_random_mode),
             ("4", "📋  Toute la table", self.start_full_mode),
+            ("5", "🎴  Tirage aléatoire (X entrées)", self.show_draw_config),
         ]
         for key, text, cmd in modes:
             row = tk.Frame(modes_frame, bg=BG_DARK)
@@ -151,7 +152,7 @@ class HomeMixin:
         upd_lbl.bind("<Button-1>", lambda e: self._check_update())
         tk.Label(
             right_foot,
-            text="Raccourcis : 1-4 = modes · P = conseil · Échap = menu · Entrée = valider",
+            text="Raccourcis : 1-5 = modes · P = conseil · Échap = menu · Entrée = valider",
             font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
         ).pack(side="right")
 

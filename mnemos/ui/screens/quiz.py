@@ -407,8 +407,196 @@ class QuizMixin:
 
     def _unbind_menu_keys(self):
         """Détache les raccourcis du menu principal."""
-        for key in ("1", "2", "3", "4", "p"):
+        for key in ("1", "2", "3", "4", "5", "p"):
             self.unbind(key)
+
+    # --------------------------------------------------------
+    # Tirage aléatoire (X entrées sans remise — nombres ou mots)
+    # --------------------------------------------------------
+    def show_draw_config(self):
+        self.clear()
+        self._unbind_menu_keys()
+
+        tk.Label(
+            self.container, text="🎴 Tirage aléatoire",
+            font=FONT_TITLE, bg=BG_DARK, fg=FG_ACCENT,
+        ).pack(pady=(40, 12))
+
+        tk.Label(
+            self.container,
+            text=(
+                "Tire X entrées au hasard dans ta table (sans doublon). "
+                "Utile pour un entraînement libre ou pour piocher des ancres "
+                "(ex. liste de courses)."
+            ),
+            font=FONT_BODY, bg=BG_DARK, fg=FG_SECONDARY, wraplength=560,
+        ).pack(pady=(0, 14))
+
+        card = self.make_card(self.container)
+        card.pack(padx=100, fill="x")
+
+        row_n = tk.Frame(card, bg=BG_CARD)
+        row_n.pack(fill="x", pady=(8, 10))
+        tk.Label(
+            row_n, text="Nombre d’entrées (X) :",
+            font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_PRIMARY,
+        ).pack(side="left", padx=(0, 10))
+        self.draw_n_var = tk.StringVar(value="5")
+        tk.Entry(
+            row_n, textvariable=self.draw_n_var, font=FONT_BODY,
+            bg=BG_INPUT, fg=FG_PRIMARY, insertbackground=FG_PRIMARY,
+            relief="flat", width=8, justify="center",
+        ).pack(side="left", ipady=4)
+        tk.Label(
+            row_n,
+            text=f"  (max. {len(self.table)} — ta table actuelle)",
+            font=FONT_SMALL, bg=BG_CARD, fg=FG_SECONDARY,
+        ).pack(side="left", padx=(10, 0))
+
+        tk.Label(
+            card, text="Afficher :",
+            font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_PRIMARY,
+        ).pack(anchor="w", pady=(10, 4))
+
+        self.draw_display_var = tk.StringVar(value="nombre")
+        for val, title, desc in [
+            (
+                "nombre",
+                "Les nombres seuls",
+                "Reconstruis l’image mentale associée à chaque chiffre.",
+            ),
+            (
+                "mot",
+                "Les mots seuls",
+                "Utilise les images comme ancres (ex. liste de courses).",
+            ),
+        ]:
+            f = tk.Frame(card, bg=BG_CARD, pady=4)
+            f.pack(fill="x")
+            tk.Radiobutton(
+                f, text=f"  {title}", variable=self.draw_display_var,
+                value=val,
+                font=FONT_BODY_BOLD, bg=BG_CARD, fg=FG_PRIMARY,
+                selectcolor=CHECK_BG, activebackground=BG_CARD,
+                activeforeground=CHECK_ON, highlightthickness=0, anchor="w",
+            ).pack(anchor="w")
+            tk.Label(
+                f, text=f"       {desc}", font=FONT_SMALL,
+                bg=BG_CARD, fg=FG_SECONDARY,
+            ).pack(anchor="w")
+
+        btn_frame = tk.Frame(self.container, bg=BG_DARK)
+        btn_frame.pack(pady=28)
+        self.make_button(
+            btn_frame, "🎲  Tirer", self._do_start_draw, accent=True,
+        ).pack(side="left", padx=10)
+        self.make_button(
+            btn_frame, "⬅  Retour", self.show_main_menu,
+        ).pack(side="left", padx=10)
+
+    def _do_start_draw(self):
+        try:
+            n_req = int(self.draw_n_var.get().strip())
+        except (ValueError, AttributeError):
+            messagebox.showwarning(
+                "Attention", "Nombre d’entrées invalide (entier).")
+            return
+        if n_req < 1:
+            messagebox.showwarning(
+                "Attention", "Il faut au moins une entrée.")
+            return
+        n_table = len(self.table)
+        if n_table < 1:
+            messagebox.showwarning(
+                "Attention", "Ta table est vide.")
+            return
+        n = min(n_req, n_table)
+        if n < n_req:
+            messagebox.showinfo(
+                "Tirage",
+                f"Ta table contient {n_table} entrée(s). "
+                f"Le tirage utilisera X = {n}.",
+            )
+        self._draw_last_n = n
+        self._draw_last_display = self.draw_display_var.get()
+        picked = random.sample(list(self.table), n)
+        self._show_draw_result(picked)
+
+    def _show_draw_result(self, pairs):
+        self.clear()
+        self.unbind("<Return>")
+        show_mots = getattr(self, "_draw_last_display", "nombre") == "mot"
+
+        tk.Label(
+            self.container, text="🎴 Résultat du tirage",
+            font=FONT_TITLE, bg=BG_DARK, fg=FG_ACCENT,
+        ).pack(pady=(28, 6))
+
+        mode_lbl = (
+            "Mots (ancres)" if show_mots
+            else "Nombres (reconstruction mentale)"
+        )
+        tk.Label(
+            self.container,
+            text=f"{len(pairs)} entrée(s) · {mode_lbl}",
+            font=FONT_BODY, bg=BG_DARK, fg=FG_SECONDARY,
+        ).pack(pady=(0, 14))
+
+        outer = tk.Frame(self.container, bg=BG_DARK)
+        outer.pack(fill="both", expand=True, padx=36, pady=(0, 8))
+
+        canvas = tk.Canvas(outer, bg=BG_CARD, highlightthickness=1,
+                           highlightbackground=BORDER_ACCENT)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=BG_CARD)
+        inner.bind(
+            "<Configure>",
+            lambda e, c=canvas: c.configure(scrollregion=c.bbox("all")),
+        )
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self._bind_mousewheel(canvas)
+
+        for i, (nombre, mot) in enumerate(pairs, start=1):
+            line = tk.Frame(inner, bg=BG_CARD)
+            line.pack(fill="x", padx=14, pady=6)
+            tk.Label(
+                line, text=f"{i}.", font=FONT_BODY_BOLD,
+                bg=BG_CARD, fg=FG_SECONDARY, width=3, anchor="e",
+            ).pack(side="left", padx=(0, 8))
+            txt = mot if show_mots else str(nombre)
+            tk.Label(
+                line, text=txt, font=FONT_BIG,
+                bg=BG_CARD, fg=FG_GREEN if show_mots else FG_ACCENT,
+                anchor="w",
+            ).pack(side="left", fill="x", expand=True)
+
+        btn_frame = tk.Frame(self.container, bg=BG_DARK)
+        btn_frame.pack(pady=(16, 24))
+        self.make_button(
+            btn_frame, "🔄  Nouveau tirage (mêmes réglages)",
+            self._do_draw_again, accent=True, width=32,
+        ).pack(side="left", padx=8)
+        self.make_button(
+            btn_frame, "⚙️  Modifier les réglages…",
+            self.show_draw_config, width=24,
+        ).pack(side="left", padx=8)
+        self.make_button(
+            btn_frame, "⬅  Menu", self.show_main_menu, width=12,
+        ).pack(side="left", padx=8)
+
+    def _do_draw_again(self):
+        n = str(getattr(self, "_draw_last_n", 5))
+        disp = getattr(self, "_draw_last_display", "nombre")
+        if not hasattr(self, "draw_n_var"):
+            self.draw_n_var = tk.StringVar(value=n)
+            self.draw_display_var = tk.StringVar(value=disp)
+        else:
+            self.draw_n_var.set(n)
+            self.draw_display_var.set(disp)
+        self._do_start_draw()
 
     # --------------------------------------------------------
     # Construction des questions et lancement
