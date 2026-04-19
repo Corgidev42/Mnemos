@@ -84,8 +84,9 @@ class HomeMixin:
             self.make_button(row, text, cmd, fill_x=True).pack(
                 side="left", fill="both", expand=True,
             )
-            if key == "4":
-                self._build_full_table_runs_home_panel(modes_frame)
+
+        # Après les 5 modes (sinon le panneau s’insérait entre 4 et 5).
+        self._build_full_table_runs_home_panel(modes_frame)
 
         for key, _, cmd in modes:
             self.bind(key, lambda e, c=cmd: c())
