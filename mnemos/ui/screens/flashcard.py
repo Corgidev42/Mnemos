@@ -10,6 +10,7 @@ class FlashcardMixin:
 
         if not self.fc_revealed:
             self.fc_card_t0 = time.time()
+            self.fc_session_segment_t0 = time.time()
 
         mode, nombre, mot = self.fc_cards[self.fc_idx]
         total = len(self.fc_cards)
@@ -158,10 +159,19 @@ class FlashcardMixin:
             self.container, "⬅  Retour au menu", self.show_main_menu,
         ).pack(pady=(14, 10))
 
+    def _fc_session_elapsed_s(self):
+        """Durée de session = temps sur la face question (sans l’écran d’auto-évaluation)."""
+        acc = float(getattr(self, "fc_session_accumulated_s", 0.0))
+        if not getattr(self, "fc_revealed", True) and hasattr(
+            self, "fc_session_segment_t0",
+        ):
+            acc += time.time() - self.fc_session_segment_t0
+        return acc
+
     def _update_flashcard_timers(self):
         if hasattr(self, "fc_session_timer_lbl") and self.fc_session_timer_lbl.winfo_exists():
             self.fc_session_timer_lbl.configure(
-                text=f"⏳ Session : {time.time() - self.fc_quiz_start:.1f}s",
+                text=f"⏳ Session : {self._fc_session_elapsed_s():.1f}s",
             )
         if hasattr(self, "fc_card_timer_lbl") and self.fc_card_timer_lbl.winfo_exists():
             t0 = getattr(self, "fc_card_t0", self.fc_quiz_start)
@@ -178,6 +188,10 @@ class FlashcardMixin:
             self.after(100, self._update_flashcard_timers)
 
     def _reveal_flashcard(self):
+        if not self.fc_revealed and hasattr(self, "fc_session_segment_t0"):
+            self.fc_session_accumulated_s = float(
+                getattr(self, "fc_session_accumulated_s", 0.0),
+            ) + (time.time() - self.fc_session_segment_t0)
         self.fc_revealed = True
         self._show_flashcard()
 
@@ -209,7 +223,7 @@ class FlashcardMixin:
 
         total = len(self.fc_cards)
         good = self.fc_score
-        total_s = time.time() - getattr(self, "fc_quiz_start", time.time())
+        total_s = self._fc_session_elapsed_s()
         if total > 0:
             err_count = sum(1 for r in self.fc_results if not r[4])
             self._record_session_run(

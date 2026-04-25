@@ -55,6 +55,7 @@ class WidgetsMixin:
         self.fc_best_streak = 0
         self.fc_results = []
         self.fc_quiz_start = time.time()
+        self.fc_session_accumulated_s = 0.0
         self._show_flashcard()
 
     def _record_session_run(

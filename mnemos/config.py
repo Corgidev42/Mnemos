@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Constantes produit et données embarquées (sans Tk)."""
-VERSION = "2.0.6"
+VERSION = "2.0.7"
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
 RELEASE_ASSET_PREFIX = "Mnemos"
