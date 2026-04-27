@@ -629,7 +629,6 @@ class QuizMixin:
         self.best_streak = 0
         self.results = []
         self.quiz_start_time = time.time()
-        self.question_start_time = time.time()
         if use_flashcard:
             self._launch_flashcard_from_questions()
             return
@@ -639,6 +638,8 @@ class QuizMixin:
     # Écran : Question du quiz
     # --------------------------------------------------------
     def _show_question(self):
+        # Début du chrono question à l’affichage (exclut l’écran de feedback de la question précédente).
+        self.question_start_time = time.time()
         self.clear()
         self.unbind("<Return>")
 
@@ -807,7 +808,6 @@ class QuizMixin:
             self.streak = 0
 
         self.results.append((mode, nombre, mot, answer, correct, elapsed))
-        self.question_start_time = time.time()
 
         self._show_feedback(correct, expected, elapsed)
 
@@ -1042,7 +1042,6 @@ class QuizMixin:
         self.best_streak = 0
         self.results = []
         self.quiz_start_time = time.time()
-        self.question_start_time = time.time()
         if getattr(self, "_quiz_is_flashcard", False):
             self._launch_flashcard_from_questions()
         else:

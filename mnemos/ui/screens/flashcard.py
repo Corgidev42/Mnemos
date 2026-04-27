@@ -11,6 +11,8 @@ class FlashcardMixin:
         if not self.fc_revealed:
             self.fc_card_t0 = time.time()
             self.fc_session_segment_t0 = time.time()
+            if hasattr(self, "fc_response_elapsed_s"):
+                del self.fc_response_elapsed_s
 
         mode, nombre, mot = self.fc_cards[self.fc_idx]
         total = len(self.fc_cards)
@@ -174,9 +176,15 @@ class FlashcardMixin:
                 text=f"⏳ Session : {self._fc_session_elapsed_s():.1f}s",
             )
         if hasattr(self, "fc_card_timer_lbl") and self.fc_card_timer_lbl.winfo_exists():
-            t0 = getattr(self, "fc_card_t0", self.fc_quiz_start)
+            if getattr(self, "fc_revealed", False) and hasattr(
+                self, "fc_response_elapsed_s",
+            ):
+                card_s = self.fc_response_elapsed_s
+            else:
+                t0 = getattr(self, "fc_card_t0", self.fc_quiz_start)
+                card_s = time.time() - t0
             self.fc_card_timer_lbl.configure(
-                text=f"⏱ Carte : {time.time() - t0:.1f}s",
+                text=f"⏱ Carte : {card_s:.1f}s",
             )
         if (
             hasattr(self, "fc_session_timer_lbl")
@@ -192,12 +200,19 @@ class FlashcardMixin:
             self.fc_session_accumulated_s = float(
                 getattr(self, "fc_session_accumulated_s", 0.0),
             ) + (time.time() - self.fc_session_segment_t0)
+        if not self.fc_revealed and hasattr(self, "fc_card_t0"):
+            # Temps mesuré jusqu’au retournement (sans la phase où la réponse est visible).
+            self.fc_response_elapsed_s = time.time() - self.fc_card_t0
         self.fc_revealed = True
         self._show_flashcard()
 
     def _flashcard_self_rate(self, correct):
         mode, nombre, mot = self.fc_cards[self.fc_idx]
-        elapsed = time.time() - self.fc_card_t0
+        elapsed = float(
+            getattr(
+                self, "fc_response_elapsed_s", time.time() - self.fc_card_t0,
+            ),
+        )
         self._apply_answer_stats(mode, nombre, mot, correct, elapsed)
         self.fc_results.append(
             (mode, nombre, mot, "(flashcard)", correct, elapsed))
