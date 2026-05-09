@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Constantes produit et données embarquées (sans Tk)."""
-VERSION = "2.0.8"
+VERSION = "2.0.9"
 APP_NAME = "Mnemos"
 APP_BUNDLE_APP = f"{APP_NAME}.app"
 RELEASE_ASSET_PREFIX = "Mnemos"
@@ -57,7 +57,7 @@ DEFAULT_WEEKLY_PLAN_DAYS = [
     "Blocs 30–59 : quiz mélange N→M et M→N, vitesse modérée.",
     "Blocs 60–89 : focus sur les images encore floues ; mode flashcards.",
     "Blocs 90–100 (et au-delà si tu en as) : consolidation ; toute la table en ordre croissant une fois.",
-    "Jeu libre : aléatoire ou focus points faibles ; noter les 5 plus lents.",
+    "Jeu libre : aléatoire ou focus points faibles (temps relatif + erreurs).",
     "Rappel léger : parcours rapide de toute la table (sans pression).",
     "Repos actif : uniquement les maîtrisés en doute ou rien — éviter la surcharge.",
 ]

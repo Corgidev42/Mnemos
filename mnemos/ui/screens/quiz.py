@@ -1,4 +1,5 @@
 """Modes quiz : blocs, focus, aléatoire, toute la table, questions."""
+from mnemos.domain.weakness import focus_priority_score, timing_baselines
 from mnemos.ui._quiz_shared import *  # noqa: F403, F401
 
 
@@ -214,15 +215,20 @@ class QuizMixin:
 
     def _do_start_focus(self):
         manual = [p for p in self.manual_weak if p in self.stats]
-        tri = sorted(self.stats.items(),
-                     key=lambda x: x[1][0] + x[1][1])
+        med_nm, med_mn = timing_baselines(self.stats)
         seen = set(manual)
         pool = list(manual)
-        for k, _v in tri:
+        rest_keys = [k for k in self.stats.keys() if k not in seen]
+        rest_keys.sort(
+            key=lambda k: (
+                -focus_priority_score(self.stats[k], med_nm, med_mn, False),
+                str(k[0]),
+                str(k[1]).lower(),
+            ),
+        )
+        for k in rest_keys:
             if len(pool) >= 20:
                 break
-            if k in seen:
-                continue
             pool.append(k)
             seen.add(k)
         if not pool:

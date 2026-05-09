@@ -1,4 +1,11 @@
 """Statistiques et historique de sessions."""
+from mnemos.domain.weakness import (
+    WEAKNESS_CRITICAL,
+    WEAKNESS_LIGHT,
+    WEAKNESS_MODERATE,
+    timing_baselines,
+    weakness_level,
+)
 from mnemos.ui._quiz_shared import *  # noqa: F403, F401
 
 
@@ -209,6 +216,7 @@ class StatsMixin:
             key=lambda it: self._stats_sort_key(it, table_index_map),
             reverse=self._stats_sort_desc,
         )
+        med_nm, med_mn = timing_baselines(self.stats)
 
         canvas = tk.Canvas(self.stats_list_frame, bg=BG_DARK,
                            highlightthickness=0)
@@ -256,7 +264,16 @@ class StatsMixin:
         for i, ((nombre, mot), vals) in enumerate(tri):
             s_nm, s_mn, t_nm, t_mn = vals
             total_score = s_nm + s_mn
-            if total_score >= 4:
+            wl = weakness_level(
+                vals, med_nm, med_mn, (nombre, mot) in self.manual_weak,
+            )
+            if wl == WEAKNESS_CRITICAL:
+                row_bg = "#28181d"
+            elif wl == WEAKNESS_MODERATE:
+                row_bg = "#2a2318"
+            elif wl == WEAKNESS_LIGHT:
+                row_bg = "#252018"
+            elif total_score >= 4:
                 row_bg = "#0d2818"
             elif total_score < 0:
                 row_bg = "#28181d"

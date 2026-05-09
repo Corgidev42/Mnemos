@@ -1,4 +1,11 @@
 """Parcours de la table."""
+from mnemos.domain.weakness import (
+    WEAKNESS_CRITICAL,
+    WEAKNESS_LIGHT,
+    WEAKNESS_MODERATE,
+    timing_baselines,
+    weakness_level,
+)
 from mnemos.ui._quiz_shared import *  # noqa: F403, F401
 
 
@@ -35,18 +42,38 @@ class TableBrowseMixin:
         ).pack(side="left", padx=(10, 0))
         search_entry.focus_set()
 
-        # Légende
+        # Légende : progression + niveaux « faible » (temps relatif aux autres paires)
         legend = tk.Frame(self.container, bg=BG_DARK)
         legend.pack(padx=60, anchor="w")
+        row_a = tk.Frame(legend, bg=BG_DARK)
+        row_a.pack(anchor="w")
         for label, color in [("Maîtrisé", FG_GREEN), ("En cours", FG_YELLOW),
                              ("À revoir", FG_RED), ("Non vu", BTN_BG)]:
-            tk.Label(legend, text="●", font=FONT_SMALL, bg=BG_DARK,
+            tk.Label(row_a, text="●", font=FONT_SMALL, bg=BG_DARK,
                      fg=color).pack(side="left", padx=(0, 2))
-            tk.Label(legend, text=label, font=FONT_SMALL, bg=BG_DARK,
+            tk.Label(row_a, text=label, font=FONT_SMALL, bg=BG_DARK,
                      fg=FG_SECONDARY).pack(side="left", padx=(0, 12))
-        tk.Label(legend, text="🎯", font=FONT_SMALL, bg=BG_DARK,
-                 fg=FG_ORANGE).pack(side="left", padx=(8, 2))
-        tk.Label(legend, text="Inclus au focus faibles", font=FONT_SMALL,
+        row_b = tk.Frame(legend, bg=BG_DARK)
+        row_b.pack(anchor="w", pady=(6, 0))
+        tk.Label(
+            row_b,
+            text="Bordure point faible (vs tes autres temps / erreurs) :",
+            font=FONT_SMALL, bg=BG_DARK, fg=FG_SECONDARY,
+        ).pack(side="left", padx=(0, 8))
+        for label, color in [
+            ("léger", FG_GOLD),
+            ("modéré", FG_ORANGE),
+            ("critique", FG_RED),
+        ]:
+            tk.Label(row_b, text="●", font=FONT_SMALL, bg=BG_DARK,
+                     fg=color).pack(side="left", padx=(0, 2))
+            tk.Label(row_b, text=label, font=FONT_SMALL, bg=BG_DARK,
+                     fg=FG_SECONDARY).pack(side="left", padx=(0, 10))
+        row_c = tk.Frame(legend, bg=BG_DARK)
+        row_c.pack(anchor="w", pady=(4, 0))
+        tk.Label(row_c, text="🎯", font=FONT_SMALL, bg=BG_DARK,
+                 fg=FG_ORANGE).pack(side="left", padx=(0, 2))
+        tk.Label(row_c, text="Inclus au focus faibles (manuel)", font=FONT_SMALL,
                  bg=BG_DARK, fg=FG_SECONDARY).pack(side="left", padx=(0, 12))
 
         # Zone table
@@ -103,13 +130,23 @@ class TableBrowseMixin:
         scrollbar.pack(side="right", fill="y")
         self._bind_mousewheel(canvas)
 
+        med_nm, med_mn = timing_baselines(self.stats)
         cols = 5
         for i, (nombre, mot) in enumerate(items):
             r, c = divmod(i, cols)
 
             vals = self.stats.get((nombre, mot), _default_stats_row())
             total_s = vals[0] + vals[1]
-            if total_s >= 4:
+            wl = weakness_level(
+                vals, med_nm, med_mn, (nombre, mot) in self.manual_weak,
+            )
+            if wl == WEAKNESS_CRITICAL:
+                border_color = FG_RED
+            elif wl == WEAKNESS_MODERATE:
+                border_color = FG_ORANGE
+            elif wl == WEAKNESS_LIGHT:
+                border_color = FG_GOLD
+            elif total_s >= 4:
                 border_color = FG_GREEN
             elif total_s < 0:
                 border_color = FG_RED
